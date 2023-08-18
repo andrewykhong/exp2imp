@@ -336,6 +336,7 @@ class Surf : protected Pointers {
   double **icvalues;       // reshaped cvalues for implicit surface generation
   int *tvalues;            // vector of per grid cell surf types
   int aveFlag;             // flag for how corners in unknown cells are set
+  int linearFlag;
   double mind;
   double cin, cout;        // in and out corner values
   double cthresh;          // threshold corner value

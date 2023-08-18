@@ -117,6 +117,10 @@ Surf::Surf(SPARTA *sparta) : Pointers(sparta)
 
   hash = new MySurfHash();
   hashfilled = 0;
+
+  // for implicit surface
+  aveFlag = 0;
+  linearFlag = 0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -266,8 +270,9 @@ void Surf::modify_params(int narg, char **arg)
         error->all(FLERR,"Read_surf group does not match fix ablate group");
 
       // temporary
-      if (strcmp(arg[iarg+4],"inout") == 0) aveFlag = 0;
-      else if (strcmp(arg[iarg+4],"dev") == 0) aveFlag = 1;
+      if (strcmp(arg[iarg+4],"inout") == 0) 0; // do nothing
+      else if (strcmp(arg[iarg+4],"ave") == 0) aveFlag = 1;
+      else if (strcmp(arg[iarg+4],"linear") == 0) linearFlag = 1;
       else error->all(FLERR,"Unknown surface corner setting called");
 
       nxyz[3]; // number of cells in each dimension
@@ -4747,6 +4752,36 @@ void Surf::set_surfcell2d()
       }
       //printf("ic: %i; p: %4.3e; i: %i; c: %4.3e\n", i, pvalues[i], ivalues[i], cvalues[i]);
 	  }// end "for" for grid cells
+  } else if(linearFlag) {
+    int clinear[Nxyz];
+    int nlinear = 0;
+    int nrow = 0;
+    for(int i = 0; i < Nxyz; i++) {
+      clinear[i] = 0;
+
+      if(ivalues[i][0] >= 0 || ivalues[i][0] >= 2) {
+        clinear[i] = 1;
+        nlinear++;
+      } else if(ivalues[i][1] >= 0) {
+        clinear[i] = 1;
+        nlinear++;
+        nrow++;
+       } else if(ivalues[i][3] >= 0) {
+        clinear[i] = 1;
+        nlinear++;
+        nrow++;
+       }
+    }
+
+    printf("nrow: %i; nlinear: %i\n", nrow, nlinear);
+    int nfree = nlinear - nrow;
+
+    //int xlinear[
+
+    //for(int i = 0; i < Nxyz; i++) printf("i: %i; c: %i\n", i, clinear[i]);
+
+
+    error->one(FLERR,"not implemented yet");
   } else {
 	  for(int i = 0; i < Nxyz; i++) {
       if(svalues[i] == 0) cvalues[i] = cout;
