@@ -29,6 +29,9 @@
 #include "hash3.h"
 #include "memory.h"
 #include "error.h"
+// for implicit
+#include "fix_ablate.h"
+#include "modify.h"
 
 using namespace SPARTA_NS;
 using namespace MathConst;
@@ -237,31 +240,48 @@ void Surf::modify_params(int narg, char **arg)
       iarg += 2;
 
     } else if (strcmp(arg[iarg],"implicit") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal surf_modify command");
+      if (iarg+4 > narg) error->all(FLERR,"Illegal surf_modify command");
       if (!exist) error->all(FLERR,"Surf_modify when surfs do not yet exist");
 
       int impflag;
       if (strcmp(arg[iarg+1],"yes") == 0) impflag = 1;
-      else if (strcmp(arg[iarg+2],"no") == 0) impflag = 0;
+      else if (strcmp(arg[iarg+1],"no") == 0) impflag = 0;
       else error->all(FLERR,"Illegal collide_modify command");
+
+      thresh = input->numeric(FLERR,arg[iarg+2]);
+      if (thresh <= 0 || thresh >= 255)
+        error->all(FLERR,"Read_surf thresh must be bounded as (0,255)");
+
+      // find ablate fix
+      char *ablateID = arg[iarg+3];
+      int ifix = modify->find_fix(ablateID);
+      if (ifix < 0)
+        error->all(FLERR,"Fix ID for read_surf does not exist");
+      if (strcmp(modify->fix[ifix]->style,"ablate") != 0)
+        error->all(FLERR,"Fix for read_surf is not a fix ablate");
+      ablate = (FixAblate *) modify->fix[ifix];
+      if (igroup != ablate->igroup)
+        error->all(FLERR,"Read_surf group does not match fix ablate group");
 
       nxyz[3]; // number of cells in each dimension
       // DO NOT SET SURFACE TO IMPLICIT YET or below will give error
+      // nxyz already takes into account subcells
       grid->check_uniform_group(igroup,nxyz,corner,xyzsize);
-      xyzsize[0] = domain->xprd;
-      xyzsize[1] = domain->yprd;
-      xyzsize[2] = domain->zprd;
-      for(int d = 0; d < 3; d++) xyzsize[d] /= nxyz[d];
+      //printf("nxyz: %i, %i, %i\n", nxyz[0], nxyz[1], nxyz[2]);
+      //xyzsize[0] = domain->xprd;
+      //xyzsize[1] = domain->yprd;
+      //xyzsize[2] = domain->zprd;
+      //for(int d = 0; d < 3; d++) xyzsize[d] /= nxyz[d];
 
       // corner points needs one more in each dim
-      nxyz[0] += 1;
-      nxyz[1] += 1;
-      nxyz[2] += 1;
-      Nxyz = nxyz[0]*nxyz[1];
-      if(dim == 3) Nxyz *= nxyz[2];
+      Nxyz = (nxyz[0]+1)*(nxyz[1]+1);
+      if(dim == 3) Nxyz *= (nxyz[2]+1);
 
       if(impflag) {
 
+        // cvalues is the grid (no overlaps)
+        // icvalues is setting each corner for each cell based on cvalues
+        // .. icvalues is cvalues in read_isurf and fix_ablate
         memory->create(cvalues,Nxyz,"surf:cvalues");
         for (int i = 0; i < Nxyz; i++) cvalues[i] = 0.0;
 
@@ -276,40 +296,36 @@ void Surf::modify_params(int narg, char **arg)
             for (int j = 0; j < 8; j++)
               icvalues[i][j] = 0.0;
         }
-
+       
         set_corners();
+        MPI_Barrier(world);
+
+        // no longer need cvalues
+        memory->destroy(cvalues);
 
         // set flag to implicit (always distributed?)
         implicit = 1;
         distributed = 1;
 
-        // clear old explicit surfaces
-        // adopt groupbit from explcit to implicit
-        //surf->setup_owned();
-        grid->unset_neighbors();
-        grid->remove_ghosts();
-        grid->clear_surf();
-        clear();
+        // all implicit surface generator handled in fix_ablate
+        // .. also invokes Marching Squares/Cubes
+        tvalues = NULL; // do later
+        cpushflag = 0; // do later
+        char *sgroupID = NULL; // do later
 
-        
+        // still need sgroupid,
+        ablate->store_corners(nxyz[0],nxyz[1],nxyz[2],corner,xyzsize,
+                        icvalues,tvalues,thresh,sgroupID,cpushflag);
 
-        // prepare for creating surfaces
-        //if (dim == 2) ms = new MarchingSquares(sparta,igroup,thresh);
-        //else mc = new MarchingCubes(sparta,igroup,thresh);
+        if (ablate->nevery == 0) modify->delete_fix(ablateID);
+        MPI_Barrier(world);
 
-        // create surfs
-        tvalues = NULL;
-        //if (dim == 2) ms->invoke(cvalues,tvalues);
-        //else mc->invoke(cvalues,tvalues,mcflags);
-
-        // reformat cvalues to 
-
-        error->one(FLERR,"implicit check");
+        // add timing later
 
       }
 
-      iarg += 2;
-
+      iarg += 4;
+      //error->one(FLERR,"implicit check");
     } else error->all(FLERR,"Illegal surf_modify command");
   }
 }
@@ -4319,6 +4335,9 @@ void Surf::set_corners()
   int ic[3], xyzcell;
   double lc[3];
 
+  double cout = 1;
+  double cin = 2;
+
 	// iterate through local cells to find surfaces
 	for(int icell = 0; icell < grid->nlocal; icell++) {
 
@@ -4335,48 +4354,48 @@ void Surf::set_corners()
     // fully inside so set all corner values to max
     if(itype == 1) {
       // set lowest corner
-      cvalues[xyzcell] = 1;
+      cvalues[xyzcell] = cin;
 
       // set remaining corners
       xyzcell = get_cell(ic[0]+1, ic[1], ic[2]);
-      cvalues[xyzcell] = 1;
+      cvalues[xyzcell] = cin;
       xyzcell = get_cell(ic[0], ic[1]+1, ic[2]);
-      cvalues[xyzcell] = 1;
+      cvalues[xyzcell] = cin;
       xyzcell = get_cell(ic[0]+1, ic[1]+1, ic[2]);
-      cvalues[xyzcell] = 1;
+      cvalues[xyzcell] = cin;
 
       if(domain->dimension==3) {
         xyzcell = get_cell(ic[0], ic[1], ic[2]+1);
-        cvalues[xyzcell] = 1;
+        cvalues[xyzcell] = cin;
         xyzcell = get_cell(ic[0]+1, ic[1], ic[2]+1);
-        cvalues[xyzcell] = 1;
+        cvalues[xyzcell] = cin;
         xyzcell = get_cell(ic[0], ic[1]+1, ic[2]+1);
-        cvalues[xyzcell] = 1;
+        cvalues[xyzcell] = cin;
         xyzcell = get_cell(ic[0]+1, ic[1]+1, ic[2]+1);
-        cvalues[xyzcell] = 1;
+        cvalues[xyzcell] = cin;
       }
       
     // fully outside so set all corners to min
     } else if (itype == 2) {
-      cvalues[xyzcell] = -1;
+      cvalues[xyzcell] = cout;
 
       // set remaining corners
       xyzcell = get_cell(ic[0]+1, ic[1], ic[2]);
-      cvalues[xyzcell] = -1;
+      cvalues[xyzcell] = cout;
       xyzcell = get_cell(ic[0], ic[1]+1, ic[2]);
-      cvalues[xyzcell] = -1;
+      cvalues[xyzcell] = cout;
       xyzcell = get_cell(ic[0]+1, ic[1]+1, ic[2]);
-      cvalues[xyzcell] = -1;
+      cvalues[xyzcell] = cout;
 
       if(domain->dimension==3) {
         xyzcell = get_cell(ic[0], ic[1], ic[2]+1);
-        cvalues[xyzcell] = -1;
+        cvalues[xyzcell] = cout;
         xyzcell = get_cell(ic[0]+1, ic[1], ic[2]+1);
-        cvalues[xyzcell] = -1;
+        cvalues[xyzcell] = cout;
         xyzcell = get_cell(ic[0], ic[1]+1, ic[2]+1);
-        cvalues[xyzcell] = -1;
+        cvalues[xyzcell] = cout;
         xyzcell = get_cell(ic[0]+1, ic[1]+1, ic[2]+1);
-        cvalues[xyzcell] = -1;
+        cvalues[xyzcell] = cout;
       }
     }
   }
@@ -4443,18 +4462,14 @@ void Surf::set_corners()
 			grid->point_outside_surfs(icell, xo);
 			ioc = grid->outside_surfs(icell, rc, xo);
       xyzcell = get_cxyz(ic,rc);
-      if(ioc) cvalues[xyzcell] = 1.0;
-			//printf("corner: %4.3e, %4.3e\n", rc[0], rc[1]);
-			//printf("outside point: %4.3e, %4.3e\n", xo[0], xo[1]);
-			//printf("in or out? %i\n", ioc);
-			
+      if(ioc) cvalues[xyzcell] = cin-0.5;
+      else cvalues[xyzcell] = cout+0.2;
 		}
 	}
 
 	// find which ones are inside and which are outside
-	for(int icell = 0; icell < Nxyz; icell++) {
-    printf("icell: %i; cval: %2.1e\n", icell, cvalues[icell]);
-	}
+	//for(int icell = 0; icell < Nxyz; icell++)
+  //  printf("icell: %i; cval: %2.1e\n", icell, cvalues[icell]);
 
 	// store into icvalues for generating implicit surface
 	for(int icell = 0; icell < grid->nlocal; icell++) {
@@ -4482,6 +4497,10 @@ void Surf::set_corners()
       xyzcell = get_cell(ic[0]+1, ic[1]+1, ic[2]+1);
       icvalues[icell][7] = cvalues[xyzcell]; 
     }
+
+    //printf("icell: %i; cval: %2.1e,%2.1e,%2.1e,%2.1e\n",
+    //        icell, icvalues[icell][0], icvalues[icell][1],
+    //        icvalues[icell][2], icvalues[icell][3]);
   }
 
 	return;

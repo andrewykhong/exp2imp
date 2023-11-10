@@ -321,7 +321,7 @@ class Surf : protected Pointers {
 
 	// For generating implicit surfaces
 	int ggroup;							 // group of grid cells implicit surface is contained within
-  int ncorner;
+  int cpushflag;            // push to max / min corner values
 	double thresh;           // lower threshold for corner values
   double corner[3];        // corners of grid group
   double xyzsize[3];       // size of lowest level cell (must be uniform grid)
@@ -329,6 +329,7 @@ class Surf : protected Pointers {
   double *cvalues;         // array of corner point values
   double **icvalues;       // reshaped cvalues for implicit surface generation
   int *tvalues;            // vector of per grid cell surf types
+  class FixAblate *ablate; // ablate fix 
 
   // private methods
 
