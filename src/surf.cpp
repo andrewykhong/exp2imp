@@ -289,19 +289,77 @@ void Surf::modify_params(int narg, char **arg)
           memory->create(icvalues,grid->nlocal,4,"surf:icvalues");
           for (int i = 0; i < grid->nlocal; i++)
             for (int j = 0; j < 4; j++)
-              icvalues[i][j] = 0.0;
+              icvalues[i][j] = 100.0;
         } else {
           memory->create(icvalues,grid->nlocal,8,"surf:icvalues");
           for (int i = 0; i < grid->nlocal; i++)
             for (int j = 0; j < 8; j++)
-              icvalues[i][j] = 0.0;
+              icvalues[i][j] = 100.0;
         }
        
         set_corners();
         MPI_Barrier(world);
 
-        // no longer need cvalues
+        /*----------------------------------------------------------*/
+        // delete old explicit surfaces
+        // copied from remove_surf.cpp
+        if (comm->me == 0)
+          if (screen) fprintf(screen,"Removing explicit surfs ...\n");
+
+        printf("sort\n");
+        if (particle->exist) particle->sort();
+        MPI_Barrier(world);
+
+        printf("remove_2/3d\n");
+        if (domain->dimension == 2) {
+          remove_2d(groupbit);
+          printf("watertight?\n");
+          check_watertight_2d();
+          if (nsurf == 0) exist = 0 ;
+        } else {
+          remove_3d(groupbit);
+          check_watertight_3d();
+          if (nsurf == 0) exist = 0 ;
+        }
+
+        printf("reset grid\n");
+        setup_owned();
+        grid->unset_neighbors();
+        grid->remove_ghosts();
+
+        if (particle->exist && grid->nsplitlocal) {
+          Grid::ChildCell *cells = grid->cells;
+          int nglocal = grid->nlocal;
+          for (int icell = 0; icell < nglocal; icell++)
+            if (cells[icell].nsplit > 1)
+              grid->combine_split_cell_particles(icell,1);
+        }
+
+        grid->clear_surf();
+        if (exist) grid->surf2grid(1);
+        MPI_Barrier(world);
+
+        if (particle->exist && grid->nsplitlocal) {
+          Grid::ChildCell *cells = grid->cells;
+          int nglocal = grid->nlocal;
+          for (int icell = 0; icell < nglocal; icell++)
+            if (cells[icell].nsplit > 1)
+              grid->assign_split_cell_particles(icell);
+        }
+        MPI_Barrier(world);
+
+        grid->setup_owned();
+        grid->acquire_ghosts();
+        grid->reset_neighbors();
+        comm->reset_neighbors();
+
+        grid->set_inout();
+        grid->type_check();
+        MPI_Barrier(world);
+
+        printf("Finished Deleting\n");
         memory->destroy(cvalues);
+        /*----------------------------------------------------------*/        
 
         // set flag to implicit (always distributed?)
         implicit = 1;
@@ -309,11 +367,13 @@ void Surf::modify_params(int narg, char **arg)
 
         // all implicit surface generator handled in fix_ablate
         // .. also invokes Marching Squares/Cubes
+        exist = 1;
         tvalues = NULL; // do later
         cpushflag = 0; // do later
         char *sgroupID = NULL; // do later
 
         // still need sgroupid,
+        // temporarily set all corners to 0, should have no surfaces
         ablate->store_corners(nxyz[0],nxyz[1],nxyz[2],corner,xyzsize,
                         icvalues,tvalues,thresh,sgroupID,cpushflag);
 
@@ -321,6 +381,12 @@ void Surf::modify_params(int narg, char **arg)
         MPI_Barrier(world);
 
         // add timing later
+
+        /***/
+        // test what happens if all surfs go away. is what is being dumped the old
+        // ... or new surfaces
+
+        /***/
 
       }
 
@@ -4305,7 +4371,7 @@ void Surf::set_corners()
   Grid::ChildInfo *cinfo = grid->cinfo;
 	double xo[3]; // outside point
 	double cx[8], cy[8], cz[8]; // store all corners
-	double rc[3]; // corner coordinate
+	double p1[3], p2[3]; // corner coordinate
 	int ioc; // flag if point is outside of inside surface
   int itype; // inside or outside cell?
   int ix, iy, iz;
@@ -4335,8 +4401,12 @@ void Surf::set_corners()
   int ic[3], xyzcell;
   double lc[3];
 
-  double cout = 1;
-  double cin = 2;
+  double cout = 0.0;
+  double cin = 255.0;
+
+  // debug
+  //cout = 0.0;
+  //cin = 0.0;
 
 	// iterate through local cells to find surfaces
 	for(int icell = 0; icell < grid->nlocal; icell++) {
@@ -4346,62 +4416,68 @@ void Surf::set_corners()
     lc[2] = cells[icell].lo[2];
     xyzcell = get_cxyz(ic,lc);
 
-    // itype = 1 - fully inside
-    // itype = 2 - fully outside
+    // itype = 1 - fully outside
+    // itype = 2 - fully inside
     // itype = 3 - has surfaces
     itype = cinfo[icell].type;
 
+    printf("icell: %i; xyz: %i; itype: %i\n", icell, xyzcell, itype);
     // fully inside so set all corner values to max
-    if(itype == 1) {
+    if(itype == 2) {
       // set lowest corner
       cvalues[xyzcell] = cin;
 
       // set remaining corners
-      xyzcell = get_cell(ic[0]+1, ic[1], ic[2]);
+      xyzcell = get_corner(ic[0]+1, ic[1], ic[2]);
+      printf("n0: %i\n", xyzcell);
       cvalues[xyzcell] = cin;
-      xyzcell = get_cell(ic[0], ic[1]+1, ic[2]);
+      xyzcell = get_corner(ic[0], ic[1]+1, ic[2]);
+      printf("n1: %i\n", xyzcell);
       cvalues[xyzcell] = cin;
-      xyzcell = get_cell(ic[0]+1, ic[1]+1, ic[2]);
+      xyzcell = get_corner(ic[0]+1, ic[1]+1, ic[2]);
+      printf("n2: %i\n", xyzcell);
       cvalues[xyzcell] = cin;
 
       if(domain->dimension==3) {
-        xyzcell = get_cell(ic[0], ic[1], ic[2]+1);
+        xyzcell = get_corner(ic[0], ic[1], ic[2]+1);
         cvalues[xyzcell] = cin;
-        xyzcell = get_cell(ic[0]+1, ic[1], ic[2]+1);
+        xyzcell = get_corner(ic[0]+1, ic[1], ic[2]+1);
         cvalues[xyzcell] = cin;
-        xyzcell = get_cell(ic[0], ic[1]+1, ic[2]+1);
+        xyzcell = get_corner(ic[0], ic[1]+1, ic[2]+1);
         cvalues[xyzcell] = cin;
-        xyzcell = get_cell(ic[0]+1, ic[1]+1, ic[2]+1);
+        xyzcell = get_corner(ic[0]+1, ic[1]+1, ic[2]+1);
         cvalues[xyzcell] = cin;
       }
       
     // fully outside so set all corners to min
-    } else if (itype == 2) {
+    } else if (itype == 1) {
       cvalues[xyzcell] = cout;
 
       // set remaining corners
-      xyzcell = get_cell(ic[0]+1, ic[1], ic[2]);
+      xyzcell = get_corner(ic[0]+1, ic[1], ic[2]);
+      printf("n0: %i\n", xyzcell);
       cvalues[xyzcell] = cout;
-      xyzcell = get_cell(ic[0], ic[1]+1, ic[2]);
+      xyzcell = get_corner(ic[0], ic[1]+1, ic[2]);
+      printf("n1: %i\n", xyzcell);
       cvalues[xyzcell] = cout;
-      xyzcell = get_cell(ic[0]+1, ic[1]+1, ic[2]);
+      xyzcell = get_corner(ic[0]+1, ic[1]+1, ic[2]);
+      printf("n2: %i\n", xyzcell);
       cvalues[xyzcell] = cout;
 
       if(domain->dimension==3) {
-        xyzcell = get_cell(ic[0], ic[1], ic[2]+1);
+        xyzcell = get_corner(ic[0], ic[1], ic[2]+1);
         cvalues[xyzcell] = cout;
-        xyzcell = get_cell(ic[0]+1, ic[1], ic[2]+1);
+        xyzcell = get_corner(ic[0]+1, ic[1], ic[2]+1);
         cvalues[xyzcell] = cout;
-        xyzcell = get_cell(ic[0], ic[1]+1, ic[2]+1);
+        xyzcell = get_corner(ic[0], ic[1]+1, ic[2]+1);
         cvalues[xyzcell] = cout;
-        xyzcell = get_cell(ic[0]+1, ic[1]+1, ic[2]+1);
+        xyzcell = get_corner(ic[0]+1, ic[1]+1, ic[2]+1);
         cvalues[xyzcell] = cout;
       }
     }
   }
 
-  // handle the unknown corners
-  // two pass to overwrite previous where corners overlap
+  // simple inside/outside corner
 	for(int icell = 0; icell < grid->nlocal; icell++) {
 
     // if no surfs, continue
@@ -4432,44 +4508,155 @@ void Surf::set_corners()
 		//printf("icell: %i\n", icell);
     csurfs = cells[icell].csurfs;
 		for(int i = 0; i < ncorner; i++) {
-      rc[0] = cx[i];
-      rc[1] = cy[i];
-      rc[2] = cz[i];
-      //printf("x: %4.3e;  y: %4.3e; z: %4.3e\n", rc[0], rc[1], rc[2]);
+      p1[0] = cx[i];
+      p1[1] = cy[i];
+      p1[2] = cz[i];
 
-      /*if(!nsurf) continue;
+      if(i+1 < ncorner) {
+        p2[0] = cx[i+1];
+        p2[1] = cy[i+1];
+        p2[2] = cz[i+1];
+      } else {
+        p2[0] = cx[0];
+        p2[1] = cy[0];
+        p2[2] = cz[0];
+      }
+
       // determine
+      double param; // point of intersection as fraction along p1->p2
+      int side, hitflag; // was hit inside or outside?
+      // side = 0,1 = OUTSIDE,INSIDE
+      double dum3[3];
+      /*for (int m = 0; m < nsurf; m++) {
+        isurf = csurfs[m];
+		    if(domain->dimension == 2) {
+          // retrive
+          line = &lines[isurf];
+          hitflag = Geometry::
+            line_line_intersect(p1,p2,line->p1,line->p2,line->norm,dum3,param,side);
+          if(hitflag) {
+            //printf("param: %4.3e; side: %i\n", param, side);
+
+            // inside then p1 is inside
+            if(side) {
+              
+            // outside then p1 is outside
+            } else {
+
+            }
+          }
+        } else {
+          tri = &tris[isurf];
+          //hitflag = Geometry::
+          //  line_tri_intersect(p1,p2,tri->p1,tri->p2,tri->p3,
+          //                     tri->norm,dum3,param,side);
+		    }
+      }*/
+
+      // simple mark in and out
+			grid->point_outside_surfs(icell, xo);
+			ioc = grid->outside_surfs(icell, p1, xo);
+      xyzcell = get_cxyz(ic,p1);
+      // if ioc=1, then outside; else 0 - inside
+      if(ioc) cvalues[xyzcell] = cout;
+      else cvalues[xyzcell] = cin;
+		}
+	}
+
+
+  // handle the unknown corners
+  // two pass to overwrite previous where corners overlap
+	/*for(int icell = 0; icell < grid->nlocal; icell++) {
+
+    // if no surfs, continue
+    nsurf = cells[icell].nsurf;
+    if(!nsurf) continue;
+
+		// store cell corners
+		if(domain->dimension == 2) {
+      cx[0] = cx[2] = cells[icell].lo[0];
+      cy[0] = cy[1] = cells[icell].lo[1];
+
+      cx[1] = cx[3] = cells[icell].hi[0];
+      cy[2] = cy[3] = cells[icell].hi[1];
+
+      // zero out z-direction
+      cz[0] = cz[1] = cz[2] = cz[3] = 0.0;
+		} else {
+      cx[0] = cx[2] = cx[4] = cx[6] = cells[icell].lo[0];
+      cy[0] = cy[1] = cy[4] = cy[5] = cells[icell].lo[1];
+      cz[0] = cz[1] = cz[2] = cz[3] = cells[icell].lo[2];
+
+      cx[1] = cx[3] = cx[5] = cx[7] = cells[icell].hi[0];
+      cy[2] = cy[3] = cy[6] = cy[7] = cells[icell].hi[1];
+      cz[4] = cz[5] = cz[6] = cz[7] = cells[icell].hi[2];
+		}
+
+		// determine corner values
+		//printf("icell: %i\n", icell);
+    csurfs = cells[icell].csurfs;
+		for(int i = 0; i < ncorner; i++) {
+      p1[0] = cx[i];
+      p1[1] = cy[i];
+      p1[2] = cz[i];
+
+      if(i+1 < ncorner) {
+        p2[0] = cx[i+1];
+        p2[1] = cy[i+1];
+        p2[2] = cz[i+1];
+      } else {
+        p2[0] = cx[0];
+        p2[1] = cy[0];
+        p2[2] = cz[0];
+      }
+
+      // determine
+      double param; // point of intersection as fraction along p1->p2
+      int side, hitflag; // was hit inside or outside?
+      // side = 0,1 = OUTSIDE,INSIDE
+      double dum3[3];
       for (int m = 0; m < nsurf; m++) {
         isurf = csurfs[m];
 		    if(domain->dimension == 2) {
           // retrive
           line = &lines[isurf];
-          //printf("line-p1: %4.3e, %4.3e, %4.3e\n", line->p1[0], line->p1[1], line->p1[2]);
-          //printf("line-p2: %4.3e, %4.3e, %4.3e\n", line->p2[0], line->p2[1], line->p2[2]);
-          //hitflag = Geometry::
-          //  line_line_intersect(x,xcell,line->p1,line->p2,
-          //                      line->norm,xc,param,side);
+          hitflag = Geometry::
+            line_line_intersect(p1,p2,line->p1,line->p2,line->norm,dum3,param,side);
+          if(hitflag) {
+            printf("param: %4.3e; side: %i\n", param, side);
+
+            // inside then p1 is inside
+            if(side) {
+              
+            // outside then p1 is outside
+            } else {
+
+            }
+          }
         } else {
           tri = &tris[isurf];
           //hitflag = Geometry::
-          //  line_tri_intersect(x,xcell,tri->p1,tri->p2,tri->p3,
-          //                     tri->norm,xc,param,side);
+          //  line_tri_intersect(p1,p2,tri->p1,tri->p2,tri->p3,
+          //                     tri->norm,dum3,param,side);
 		    }
-      }*/
-
+      }
 
       // simple mark in and out
 			grid->point_outside_surfs(icell, xo);
-			ioc = grid->outside_surfs(icell, rc, xo);
-      xyzcell = get_cxyz(ic,rc);
-      if(ioc) cvalues[xyzcell] = cin-0.5;
-      else cvalues[xyzcell] = cout+0.2;
+			ioc = grid->outside_surfs(icell, p1, xo);
+      xyzcell = get_cxyz(ic,p1);
+      if(ioc) cvalues[xyzcell] = cin;
+      else cvalues[xyzcell] = cout;
 		}
-	}
+	}*/
 
+  //error->one(FLERR,"check");
 	// find which ones are inside and which are outside
-	//for(int icell = 0; icell < Nxyz; icell++)
-  //  printf("icell: %i; cval: %2.1e\n", icell, cvalues[icell]);
+	for(int icell = 0; icell < Nxyz; icell++) {
+    if(cvalues[icell] < 0) error->one(FLERR,"negative corner");
+    printf("icell: %i; cval: %2.1e\n", icell, cvalues[icell]);
+  }
+  error->one(FLERR,"check");
 
 	// store into icvalues for generating implicit surface
 	for(int icell = 0; icell < grid->nlocal; icell++) {
@@ -4527,14 +4714,13 @@ int Surf::get_cxyz(int *ic, double *lc)
     ic[d] = static_cast<int> (std::round(lclo[d] / xyzsize[d]));
   }
 
-  int icell = get_cell(ic[0], ic[1], ic[2]);
+  int icell = get_corner(ic[0], ic[1], ic[2]);
 
   return icell;
 }
 
 /* ----------------------------------------------------------------------
-	 Determines corner values given an explicit surface. Cvalues then used
-	 later in ablate to create the implicit surfaces
+	 Get cell from coordinates
 ------------------------------------------------------------------------- */
 
 int Surf::get_cell(int icx, int icy, int icz)
@@ -4544,5 +4730,96 @@ int Surf::get_cell(int icx, int icy, int icz)
   else icell = icx + icy*nxyz[0] + icz*nxyz[0]*nxyz[1];
 
   return icell;
+}
+
+/* ----------------------------------------------------------------------
+	 Get corner values from coordinates
+------------------------------------------------------------------------- */
+
+int Surf::get_corner(int icx, int icy, int icz)
+{
+  int icell;
+  if(domain->dimension == 2) icell = icx + icy*(nxyz[0]+1);
+  else icell = icx + icy*(nxyz[0]+1) + icz*(nxyz[0]+1)*(nxyz[1]+1);
+
+  return icell;
+}
+
+/* ----------------------------------------------------------------------
+   remove all lines in surf group
+   condense data structures by removing deleted points & lines
+------------------------------------------------------------------------- */
+
+void Surf::remove_2d(int groupbit)
+{
+  int i;
+
+  // remove lines in group
+  Surf::Line *line;
+  int nline = nsurf;
+  int nbytes = sizeof(Surf::Line);
+
+  int n = 0;
+  for (i = 0; i < nline; i++) {
+    if (lines[i].mask & groupbit) continue;
+    if (i != n) memcpy(&lines[n],&lines[i],nbytes);
+    n++;
+  }
+  nsurf = nlocal = n;
+
+  // print stats after removal
+
+  int nline_remove = nline - nsurf;
+
+  if (comm->me == 0) {
+    if (screen) {
+      fprintf(screen,"  removed %d lines\n",nline_remove);
+      fprintf(screen,"  " BIGINT_FORMAT " lines remain\n",nsurf);
+    }
+    if (logfile) {
+      fprintf(logfile,"  removed %d lines\n",nline_remove);
+      fprintf(logfile,"  " BIGINT_FORMAT " lines remain\n",nsurf);
+    }
+  }
+}
+
+/* ----------------------------------------------------------------------
+   remove all triangles in surf group
+   condense data structures by removing deleted points & triangles
+------------------------------------------------------------------------- */
+
+void Surf::remove_3d(int groupbit)
+{
+  int i;
+
+  // remove triangles in group
+
+  Surf::Tri *tris = surf->tris;
+  int ntri = surf->nsurf;
+  int nbytes = sizeof(Surf::Tri);
+
+  int n = 0;
+  for (i = 0; i < ntri; i++) {
+    if (tris[i].mask & groupbit) continue;
+    if (i != n) memcpy(&tris[n],&tris[i],nbytes);
+    n++;
+  }
+
+  nsurf = nlocal = n;
+
+  // print stats after removal
+
+  int ntri_remove = ntri - nsurf;
+
+  if (comm->me == 0) {
+    if (screen) {
+      fprintf(screen,"  removed %d tris\n",ntri_remove);
+      fprintf(screen,"  " BIGINT_FORMAT " tris remain\n",nsurf);
+    }
+    if (logfile) {
+      fprintf(logfile,"  removed %d tris\n",ntri_remove);
+      fprintf(logfile,"  " BIGINT_FORMAT " tris remain\n",nsurf);
+    }
+  }
 }
 

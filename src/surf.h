@@ -365,7 +365,10 @@ class Surf : protected Pointers {
 	void set_corners();
   void corner2cell();
   int get_cxyz(int *, double *);
-  int get_cell(int, int, int);   // 
+  int get_cell(int, int, int);
+  int get_corner(int, int, int);
+  void remove_2d(int);
+  void remove_3d(int);
   class MarchingSquares *ms;
   class MarchingCubes *mc;
 };
