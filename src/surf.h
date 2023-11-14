@@ -362,11 +362,28 @@ class Surf : protected Pointers {
                              int &, int *&, char *&, void *);
 
 	// For explicit to implicit
+  // given a pair of corners, give the intersection point
+  // .. given as a fraction between the two points
+  typedef std::map<std::pair<int,int>, double> MyIntersects;
+
+  // for tracking neighbors
+  /*struct Cneighbor {
+    int corners[8];
+  }*/
+
+  // track neighbors which have intersection
+  typedef std::map<double,int> MyNeighbors;
+
+  MyIntersects *intersects;
+  MyNeighbors *neighbors;
+
+  void find_intersections();
 	void set_corners();
   void corner2cell();
   int get_cxyz(int *, double *);
   int get_cell(int, int, int);
   int get_corner(int, int, int);
+  int get_corner(double, double, double);
   void remove_2d(int);
   void remove_3d(int);
   class MarchingSquares *ms;

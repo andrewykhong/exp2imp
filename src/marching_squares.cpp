@@ -15,6 +15,7 @@
 #include "marching_squares.h"
 #include "grid.h"
 #include "surf.h"
+#include "error.h"
 
 using namespace SPARTA_NS;
 
@@ -251,6 +252,12 @@ void MarchingSquares::invoke(double **cvalues, int *svalues)
     // surf ID = cell ID for all surfs in cell
 
     ptr = csurfs->get(nsurf);
+
+    /*printf("icell: %i; nsurf: %i\n", icell, nsurf);
+    printf("lo: %4.3e, %4.3e\n", lo[0], lo[1]);
+    printf("hi: %4.3e, %4.3e\n", hi[0], hi[1]);
+    printf("pt0: %4.3e, %4.3e\n", pt[0][0], pt[0][1]);
+    printf("pt1: %4.3e, %4.3e\n", pt[1][0], pt[1][1]);*/
 
     ipt = 0;
     for (i = 0; i < nsurf; i++) {

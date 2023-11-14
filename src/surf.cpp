@@ -283,20 +283,23 @@ void Surf::modify_params(int narg, char **arg)
         // icvalues is setting each corner for each cell based on cvalues
         // .. icvalues is cvalues in read_isurf and fix_ablate
         memory->create(cvalues,Nxyz,"surf:cvalues");
-        for (int i = 0; i < Nxyz; i++) cvalues[i] = 0.0;
 
         if (dim == 2) {
           memory->create(icvalues,grid->nlocal,4,"surf:icvalues");
           for (int i = 0; i < grid->nlocal; i++)
             for (int j = 0; j < 4; j++)
-              icvalues[i][j] = 100.0;
+              icvalues[i][j] = 0.0;
         } else {
           memory->create(icvalues,grid->nlocal,8,"surf:icvalues");
           for (int i = 0; i < grid->nlocal; i++)
             for (int j = 0; j < 8; j++)
-              icvalues[i][j] = 100.0;
+              icvalues[i][j] = 0.0;
         }
-       
+
+        // create new hash to keep track of which corners have intersections
+        //hash = new MyHash;
+
+        //find_intersections(); // 
         set_corners();
         MPI_Barrier(world);
 
@@ -306,14 +309,14 @@ void Surf::modify_params(int narg, char **arg)
         if (comm->me == 0)
           if (screen) fprintf(screen,"Removing explicit surfs ...\n");
 
-        printf("sort\n");
+        //printf("sort\n");
         if (particle->exist) particle->sort();
         MPI_Barrier(world);
 
-        printf("remove_2/3d\n");
+        //printf("remove_2/3d\n");
         if (domain->dimension == 2) {
           remove_2d(groupbit);
-          printf("watertight?\n");
+          //printf("watertight?\n");
           check_watertight_2d();
           if (nsurf == 0) exist = 0 ;
         } else {
@@ -322,7 +325,7 @@ void Surf::modify_params(int narg, char **arg)
           if (nsurf == 0) exist = 0 ;
         }
 
-        printf("reset grid\n");
+        //printf("reset grid\n");
         setup_owned();
         grid->unset_neighbors();
         grid->remove_ghosts();
@@ -4405,8 +4408,19 @@ void Surf::set_corners()
   double cin = 255.0;
 
   // debug
-  //cout = 0.0;
-  //cin = 0.0;
+  //cout = thresh;
+  cin = 2.0*thresh;
+
+  // smallest cell length
+  double mind;
+  if(domain->dimension == 2) {
+    mind = std::min(xyzsize[0], xyzsize[1]);
+  } else {
+    mind = std::min(xyzsize[0], xyzsize[1]);
+    mind = std::min(mind, xyzsize[2]);
+  }
+  // initialize cvalues
+  for (int i = 0; i < Nxyz; i++) cvalues[i] = -1.0;
 
 	// iterate through local cells to find surfaces
 	for(int icell = 0; icell < grid->nlocal; icell++) {
@@ -4419,9 +4433,17 @@ void Surf::set_corners()
     // itype = 1 - fully outside
     // itype = 2 - fully inside
     // itype = 3 - has surfaces
+    // cannot just use types, if surface on corner
+    // .. can be either 2 or 3 depending on which corner (ambiguity)
     itype = cinfo[icell].type;
+    if(itype==3) {
+      //printf("icell: %i; itype: %i\n", icell, itype);
+      //printf("lo: %4.1f, %4.1f, %4.1f\n",
+      //  cells[icell].lo[0], cells[icell].lo[1], cells[icell].lo[2]);
+      //printf("hi: %4.1f, %4.1f, %4.1f\n",
+      //  cells[icell].hi[0], cells[icell].hi[1], cells[icell].hi[2]);
+    }
 
-    printf("icell: %i; xyz: %i; itype: %i\n", icell, xyzcell, itype);
     // fully inside so set all corner values to max
     if(itype == 2) {
       // set lowest corner
@@ -4429,13 +4451,10 @@ void Surf::set_corners()
 
       // set remaining corners
       xyzcell = get_corner(ic[0]+1, ic[1], ic[2]);
-      printf("n0: %i\n", xyzcell);
       cvalues[xyzcell] = cin;
       xyzcell = get_corner(ic[0], ic[1]+1, ic[2]);
-      printf("n1: %i\n", xyzcell);
       cvalues[xyzcell] = cin;
       xyzcell = get_corner(ic[0]+1, ic[1]+1, ic[2]);
-      printf("n2: %i\n", xyzcell);
       cvalues[xyzcell] = cin;
 
       if(domain->dimension==3) {
@@ -4451,17 +4470,15 @@ void Surf::set_corners()
       
     // fully outside so set all corners to min
     } else if (itype == 1) {
-      cvalues[xyzcell] = cout;
+      continue; // initialized as setting all as out
+      /*cvalues[xyzcell] = cout;
 
       // set remaining corners
       xyzcell = get_corner(ic[0]+1, ic[1], ic[2]);
-      printf("n0: %i\n", xyzcell);
       cvalues[xyzcell] = cout;
       xyzcell = get_corner(ic[0], ic[1]+1, ic[2]);
-      printf("n1: %i\n", xyzcell);
       cvalues[xyzcell] = cout;
       xyzcell = get_corner(ic[0]+1, ic[1]+1, ic[2]);
-      printf("n2: %i\n", xyzcell);
       cvalues[xyzcell] = cout;
 
       if(domain->dimension==3) {
@@ -4473,16 +4490,18 @@ void Surf::set_corners()
         cvalues[xyzcell] = cout;
         xyzcell = get_corner(ic[0]+1, ic[1]+1, ic[2]+1);
         cvalues[xyzcell] = cout;
-      }
+      }*/
     }
   }
-
+  //error->one(FLERR,"check");
   // simple inside/outside corner
 	for(int icell = 0; icell < grid->nlocal; icell++) {
 
     // if no surfs, continue
     nsurf = cells[icell].nsurf;
     if(!nsurf) continue;
+
+    //printf("icell: %i; nsurf: %i\n", icell, nsurf);
 
 		// store cell corners
 		if(domain->dimension == 2) {
@@ -4504,13 +4523,19 @@ void Surf::set_corners()
       cz[4] = cz[5] = cz[6] = cz[7] = cells[icell].hi[2];
 		}
 
+    //printf("lo: %4.1f, %4.1f, %4.1f\n",
+    //  cells[icell].lo[0], cells[icell].lo[1], cells[icell].lo[2]);
+    //printf("hi: %4.1f, %4.1f, %4.1f\n",
+    //  cells[icell].hi[0], cells[icell].hi[1], cells[icell].hi[2]);
+
 		// determine corner values
-		//printf("icell: %i\n", icell);
+
     csurfs = cells[icell].csurfs;
 		for(int i = 0; i < ncorner; i++) {
       p1[0] = cx[i];
       p1[1] = cy[i];
       p1[2] = cz[i];
+      //printf("--p1: %4.1f, %4.1f, %4.1f\n", p1[0], p1[1], p1[2]);
 
       if(i+1 < ncorner) {
         p2[0] = cx[i+1];
@@ -4527,15 +4552,26 @@ void Surf::set_corners()
       int side, hitflag; // was hit inside or outside?
       // side = 0,1 = OUTSIDE,INSIDE
       double dum3[3];
-      /*for (int m = 0; m < nsurf; m++) {
+
+      // test all surfs+corners to see if any hit
+      hitflag = 0;
+      grid->point_outside_surfs(icell, xo);
+      for (int m = 0; m < nsurf; m++) {
         isurf = csurfs[m];
 		    if(domain->dimension == 2) {
           // retrive
           line = &lines[isurf];
+          //hitflag = Geometry::
+          //  line_line_intersect(p1,p2,line->p1,line->p2,line->norm,dum3,param,side);
+
           hitflag = Geometry::
-            line_line_intersect(p1,p2,line->p1,line->p2,line->norm,dum3,param,side);
+            line_line_intersect(xo,p1,line->p1,line->p2,line->norm,dum3,param,side);
+          double dparam = (1.0 - param) / mind;
+          if( dparam < EPSILON_GRID) hitflag = 0;
+
           if(hitflag) {
-            //printf("param: %4.3e; side: %i\n", param, side);
+            printf("param: %4.3e; icell: %i; point: %4.3e\n", param, icell, 1-param);
+            break;
 
             // inside then p1 is inside
             if(side) {
@@ -4551,17 +4587,28 @@ void Surf::set_corners()
           //  line_tri_intersect(p1,p2,tri->p1,tri->p2,tri->p3,
           //                     tri->norm,dum3,param,side);
 		    }
-      }*/
+      }
+
+      //xyzcell = get_cxyz(ic,p1);
+      xyzcell = get_corner(p1[0], p1[1], p1[2]);
+
+      if(hitflag) cvalues[xyzcell] = cin;
+      else cvalues[xyzcell] = cout;
+
 
       // simple mark in and out
-			grid->point_outside_surfs(icell, xo);
-			ioc = grid->outside_surfs(icell, p1, xo);
-      xyzcell = get_cxyz(ic,p1);
+			//grid->point_outside_surfs(icell, xo);
+			//ioc = grid->outside_surfs(icell, p1, xo);
+      //printf("xo: %4.1f, %4.1f, %4.1f; ioc: %i\n", xo[0], xo[1], xo[2], ioc);
+
+      //printf("cn: %i\n", xyzcell);
       // if ioc=1, then outside; else 0 - inside
-      if(ioc) cvalues[xyzcell] = cout;
-      else cvalues[xyzcell] = cin;
+      //if(ioc) cvalues[xyzcell] = std::max(cvalues[xyzcell],cout);
+      //else cvalues[xyzcell] = cin;
 		}
+    //error->one(FLERR,"check cell corners");
 	}
+  //error->one(FLERR,"check");
 
 
   // handle the unknown corners
@@ -4653,10 +4700,10 @@ void Surf::set_corners()
   //error->one(FLERR,"check");
 	// find which ones are inside and which are outside
 	for(int icell = 0; icell < Nxyz; icell++) {
-    if(cvalues[icell] < 0) error->one(FLERR,"negative corner");
-    printf("icell: %i; cval: %2.1e\n", icell, cvalues[icell]);
+    //if(cvalues[icell] < 0) error->one(FLERR,"negative corner");
+    //printf("icell: %i; cval: %4.1f\n", icell, cvalues[icell]);
   }
-  error->one(FLERR,"check");
+  //error->one(FLERR,"check2");
 
 	// store into icvalues for generating implicit surface
 	for(int icell = 0; icell < grid->nlocal; icell++) {
@@ -4667,21 +4714,21 @@ void Surf::set_corners()
 
     xyzcell = get_cxyz(ic,lc);
     icvalues[icell][0] = cvalues[xyzcell];
-    xyzcell = get_cell(ic[0]+1, ic[1], ic[2]);
+    xyzcell = get_corner(ic[0]+1, ic[1], ic[2]);
     icvalues[icell][1] = cvalues[xyzcell];
-    xyzcell = get_cell(ic[0], ic[1]+1, ic[2]);
+    xyzcell = get_corner(ic[0], ic[1]+1, ic[2]);
     icvalues[icell][2] = cvalues[xyzcell];
-    xyzcell = get_cell(ic[0]+1, ic[1]+1, ic[2]);
+    xyzcell = get_corner(ic[0]+1, ic[1]+1, ic[2]);
     icvalues[icell][3] = cvalues[xyzcell]; 
 
     if(domain->dimension==3) {
-      xyzcell = get_cell(ic[0], ic[1], ic[2]+1);
+      xyzcell = get_corner(ic[0], ic[1], ic[2]+1);
       icvalues[icell][4] = cvalues[xyzcell]; 
-      xyzcell = get_cell(ic[0]+1, ic[1], ic[2]+1);
+      xyzcell = get_corner(ic[0]+1, ic[1], ic[2]+1);
       icvalues[icell][5] = cvalues[xyzcell]; 
-      xyzcell = get_cell(ic[0], ic[1]+1, ic[2]+1);
+      xyzcell = get_corner(ic[0], ic[1]+1, ic[2]+1);
       icvalues[icell][6] = cvalues[xyzcell]; 
-      xyzcell = get_cell(ic[0]+1, ic[1]+1, ic[2]+1);
+      xyzcell = get_corner(ic[0]+1, ic[1]+1, ic[2]+1);
       icvalues[icell][7] = cvalues[xyzcell]; 
     }
 
@@ -4689,7 +4736,7 @@ void Surf::set_corners()
     //        icell, icvalues[icell][0], icvalues[icell][1],
     //        icvalues[icell][2], icvalues[icell][3]);
   }
-
+  //error->one(FLERR,"check");
 	return;
 }
 
@@ -4741,6 +4788,37 @@ int Surf::get_corner(int icx, int icy, int icz)
   int icell;
   if(domain->dimension == 2) icell = icx + icy*(nxyz[0]+1);
   else icell = icx + icy*(nxyz[0]+1) + icz*(nxyz[0]+1)*(nxyz[1]+1);
+
+  return icell;
+}
+
+/* ----------------------------------------------------------------------
+	 Get corner values from coordinates
+------------------------------------------------------------------------- */
+
+int Surf::get_corner(double dcx, double dcy, double dcz)
+{
+  // find lower bounds
+  double lo[3];
+  lo[0] = domain->boxhi[0];
+  lo[1] = domain->boxhi[1];
+  lo[2] = domain->boxhi[2];
+
+  // shift by lower bounds
+  double lclo[3];
+  double ic[3];
+  double lc[3];
+  lc[0] = dcx;
+  lc[1] = dcy; 
+  lc[2] = dcz;
+  for(int d = 0; d < 3; d++) {
+    lclo[d] = lo[d] + lc[d];
+    ic[d] = static_cast<int> (std::round(lclo[d] / xyzsize[d]));
+  }
+
+  int icell;
+  if(domain->dimension == 2) icell = ic[0] + ic[1]*(nxyz[0]+1);
+  else icell = ic[0] + ic[1]*(nxyz[0]+1) + ic[2]*(nxyz[0]+1)*(nxyz[1]+1);
 
   return icell;
 }

@@ -67,7 +67,6 @@ enum{SOUTSIDE,SINSIDE,ONSURF2OUT,ONSURF2IN};  // several files (changed 2 words)
 
 void Grid::surf2grid(int subflag, int outflag)
 {
-	//error->one(FLERR,"in surf2grid"); 
   if (surf->distributed) {
     surf2grid_surf_algorithm(outflag);
   } else if (surfgrid_algorithm == PERAUTO) {
@@ -1931,6 +1930,9 @@ int Grid::outside_surfs(int icell, double *x, double *xcell)
 
   minflag = 0;
   minparam = 2.0;
+  //printf("start: %4.1f, %4.1f, %4.1f\n", xcell[0], xcell[1], xcell[2]);
+  //printf("stop: %4.1f, %4.1f, %4.1f\n", x[0], x[1], x[2]);
+
   for (m = 0; m < nsurf; m++) {
     isurf = csurfs[m];
     if (dim == 3) {
@@ -1942,6 +1944,7 @@ int Grid::outside_surfs(int icell, double *x, double *xcell)
       line = &lines[isurf];
       hitflag = Geometry::
         line_line_intersect(x,xcell,line->p1,line->p2,line->norm,xc,param,side);
+      
     }
     if (hitflag && param < minparam) {
       minflag = 1;
