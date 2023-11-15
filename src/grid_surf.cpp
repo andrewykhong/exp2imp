@@ -1930,8 +1930,6 @@ int Grid::outside_surfs(int icell, double *x, double *xcell)
 
   minflag = 0;
   minparam = 2.0;
-  //printf("start: %4.1f, %4.1f, %4.1f\n", xcell[0], xcell[1], xcell[2]);
-  //printf("stop: %4.1f, %4.1f, %4.1f\n", x[0], x[1], x[2]);
 
   for (m = 0; m < nsurf; m++) {
     isurf = csurfs[m];

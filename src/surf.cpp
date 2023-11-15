@@ -46,6 +46,7 @@ enum{INT,DOUBLE};                      // several files
 #define DELTAMODEL 4
 #define EPSSQ 1.0e-12
 #define EPSILON_GRID 1.0e-3
+#define EPSSURF 1.0e-4
 #define BIG 1.0e20
 #define MAXGROUP 32
 
@@ -249,7 +250,7 @@ void Surf::modify_params(int narg, char **arg)
       else error->all(FLERR,"Illegal collide_modify command");
 
       thresh = input->numeric(FLERR,arg[iarg+2]);
-      if (thresh <= 0 || thresh >= 255)
+      if (thresh < 0 || thresh > 255)
         error->all(FLERR,"Read_surf thresh must be bounded as (0,255)");
 
       // find ablate fix
@@ -283,6 +284,7 @@ void Surf::modify_params(int narg, char **arg)
         // icvalues is setting each corner for each cell based on cvalues
         // .. icvalues is cvalues in read_isurf and fix_ablate
         memory->create(cvalues,Nxyz,"surf:cvalues");
+        memory->create(ivalues,Nxyz,"surf:ivalues");
 
         if (dim == 2) {
           memory->create(icvalues,grid->nlocal,4,"surf:icvalues");
@@ -4375,6 +4377,7 @@ void Surf::set_corners()
 	double xo[3]; // outside point
 	double cx[8], cy[8], cz[8]; // store all corners
 	double p1[3], p2[3]; // corner coordinate
+  double pp[3], pm[3];
 	int ioc; // flag if point is outside of inside surface
   int itype; // inside or outside cell?
   int ix, iy, iz;
@@ -4410,6 +4413,7 @@ void Surf::set_corners()
   // debug
   //cout = thresh;
   cin = 2.0*thresh;
+  //cin = 1.0;
 
   // smallest cell length
   double mind;
@@ -4419,8 +4423,10 @@ void Surf::set_corners()
     mind = std::min(xyzsize[0], xyzsize[1]);
     mind = std::min(mind, xyzsize[2]);
   }
-  // initialize cvalues
-  for (int i = 0; i < Nxyz; i++) cvalues[i] = -1.0;
+  // initialize cvalues as all out
+  // intialize ivalues as not intersections
+  for (int i = 0; i < Nxyz; i++) cvalues[i] = 0.0;
+  for (int i = 0; i < Nxyz; i++) ivalues[i] = 0;
 
 	// iterate through local cells to find surfaces
 	for(int icell = 0; icell < grid->nlocal; icell++) {
@@ -4436,13 +4442,6 @@ void Surf::set_corners()
     // cannot just use types, if surface on corner
     // .. can be either 2 or 3 depending on which corner (ambiguity)
     itype = cinfo[icell].type;
-    if(itype==3) {
-      //printf("icell: %i; itype: %i\n", icell, itype);
-      //printf("lo: %4.1f, %4.1f, %4.1f\n",
-      //  cells[icell].lo[0], cells[icell].lo[1], cells[icell].lo[2]);
-      //printf("hi: %4.1f, %4.1f, %4.1f\n",
-      //  cells[icell].hi[0], cells[icell].hi[1], cells[icell].hi[2]);
-    }
 
     // fully inside so set all corner values to max
     if(itype == 2) {
@@ -4493,7 +4492,7 @@ void Surf::set_corners()
       }*/
     }
   }
-  //error->one(FLERR,"check");
+
   // simple inside/outside corner
 	for(int icell = 0; icell < grid->nlocal; icell++) {
 
@@ -4523,10 +4522,10 @@ void Surf::set_corners()
       cz[4] = cz[5] = cz[6] = cz[7] = cells[icell].hi[2];
 		}
 
-    //printf("lo: %4.1f, %4.1f, %4.1f\n",
-    //  cells[icell].lo[0], cells[icell].lo[1], cells[icell].lo[2]);
-    //printf("hi: %4.1f, %4.1f, %4.1f\n",
-    //  cells[icell].hi[0], cells[icell].hi[1], cells[icell].hi[2]);
+    printf("lo: %4.3e, %4.3e\n",
+      cells[icell].lo[0], cells[icell].lo[1]);
+    printf("hi: %4.3e, %4.3e\n",
+      cells[icell].hi[0], cells[icell].hi[1]);
 
 		// determine corner values
 
@@ -4550,27 +4549,57 @@ void Surf::set_corners()
       // determine
       double param; // point of intersection as fraction along p1->p2
       int side, hitflag; // was hit inside or outside?
+      int cornerflag;
       // side = 0,1 = OUTSIDE,INSIDE
       double dum3[3];
 
       // test all surfs+corners to see if any hit
       hitflag = 0;
-      grid->point_outside_surfs(icell, xo);
+      cornerflag = 0;
+      int found = grid->point_outside_surfs(icell, xo);
+      if(!found) continue;
       for (int m = 0; m < nsurf; m++) {
         isurf = csurfs[m];
 		    if(domain->dimension == 2) {
           // retrive
           line = &lines[isurf];
           //hitflag = Geometry::
-          //  line_line_intersect(p1,p2,line->p1,line->p2,line->norm,dum3,param,side);
+          //  line_line_intersect(p1,xo,line->p1,line->p2,line->norm,dum3,param,side);
+
+          // need to displace corners slightly in case surface crosses corner
+          // .. to remove ambiguity
+          // check both side; if disagree, then it's a corner point
+
+          pm[0] = p1[0] - EPSSURF * mind * line->norm[0];
+          pm[1] = p1[1] - EPSSURF * mind * line->norm[1];
+          pm[2] = p1[2] - EPSSURF * mind * line->norm[2];
+
+          pp[0] = p1[0] + EPSSURF * mind * line->norm[0];
+          pp[1] = p1[1] + EPSSURF * mind * line->norm[1];
+          pp[2] = p1[2] + EPSSURF * mind * line->norm[2];
 
           hitflag = Geometry::
-            line_line_intersect(xo,p1,line->p1,line->p2,line->norm,dum3,param,side);
-          double dparam = (1.0 - param) / mind;
-          if( dparam < EPSILON_GRID) hitflag = 0;
+            line_line_intersect(pm,xo,line->p1,line->p2,line->norm,dum3,param,side);
+
+          // determin eif corner
+          if(hitflag) {
+            hitflag = Geometry::
+              line_line_intersect(pp,xo,line->p1,line->p2,line->norm,dum3,param,side);
+            if(!hitflag) cornerflag = 1;
+          } else {
+            hitflag = Geometry::
+              line_line_intersect(pp,xo,line->p1,line->p2,line->norm,dum3,param,side);
+            if(hitflag) cornerflag = 1;
+          }
+
+          printf("icell: %i; hitflag: %i; edgeflag: %i\n", icell, hitflag, cornerflag);
+          printf("p1: %4.3e, %4.3e, %4.3e\n", p1[0], p1[1], p1[2]);
+          printf("xo: %4.3e, %4.3e, %4.3e\n", xo[0], xo[1], xo[2]);
 
           if(hitflag) {
-            printf("param: %4.3e; icell: %i; point: %4.3e\n", param, icell, 1-param);
+            //printf("param: %4.3e; param1: %4.3e; param2: %4.3e; icell: %i; edgeflag: %i\n", param, param1, param2, icell, edgeflag);
+            //printf("p1: %4.3e, %4.3e, %4.3e\n", p1[0], p1[1], p1[2]);
+            //printf("xo: %4.3e, %4.3e, %4.3e\n", xo[0], xo[1], xo[2]);
             break;
 
             // inside then p1 is inside
@@ -4592,7 +4621,9 @@ void Surf::set_corners()
       //xyzcell = get_cxyz(ic,p1);
       xyzcell = get_corner(p1[0], p1[1], p1[2]);
 
-      if(hitflag) cvalues[xyzcell] = cin;
+      // if corner, have slight below threshold
+      if(cornerflag) cvalues[xyzcell] = thresh - EPSILON_GRID;
+      else if(hitflag) cvalues[xyzcell] = cin;
       else cvalues[xyzcell] = cout;
 
 
@@ -4609,93 +4640,6 @@ void Surf::set_corners()
     //error->one(FLERR,"check cell corners");
 	}
   //error->one(FLERR,"check");
-
-
-  // handle the unknown corners
-  // two pass to overwrite previous where corners overlap
-	/*for(int icell = 0; icell < grid->nlocal; icell++) {
-
-    // if no surfs, continue
-    nsurf = cells[icell].nsurf;
-    if(!nsurf) continue;
-
-		// store cell corners
-		if(domain->dimension == 2) {
-      cx[0] = cx[2] = cells[icell].lo[0];
-      cy[0] = cy[1] = cells[icell].lo[1];
-
-      cx[1] = cx[3] = cells[icell].hi[0];
-      cy[2] = cy[3] = cells[icell].hi[1];
-
-      // zero out z-direction
-      cz[0] = cz[1] = cz[2] = cz[3] = 0.0;
-		} else {
-      cx[0] = cx[2] = cx[4] = cx[6] = cells[icell].lo[0];
-      cy[0] = cy[1] = cy[4] = cy[5] = cells[icell].lo[1];
-      cz[0] = cz[1] = cz[2] = cz[3] = cells[icell].lo[2];
-
-      cx[1] = cx[3] = cx[5] = cx[7] = cells[icell].hi[0];
-      cy[2] = cy[3] = cy[6] = cy[7] = cells[icell].hi[1];
-      cz[4] = cz[5] = cz[6] = cz[7] = cells[icell].hi[2];
-		}
-
-		// determine corner values
-		//printf("icell: %i\n", icell);
-    csurfs = cells[icell].csurfs;
-		for(int i = 0; i < ncorner; i++) {
-      p1[0] = cx[i];
-      p1[1] = cy[i];
-      p1[2] = cz[i];
-
-      if(i+1 < ncorner) {
-        p2[0] = cx[i+1];
-        p2[1] = cy[i+1];
-        p2[2] = cz[i+1];
-      } else {
-        p2[0] = cx[0];
-        p2[1] = cy[0];
-        p2[2] = cz[0];
-      }
-
-      // determine
-      double param; // point of intersection as fraction along p1->p2
-      int side, hitflag; // was hit inside or outside?
-      // side = 0,1 = OUTSIDE,INSIDE
-      double dum3[3];
-      for (int m = 0; m < nsurf; m++) {
-        isurf = csurfs[m];
-		    if(domain->dimension == 2) {
-          // retrive
-          line = &lines[isurf];
-          hitflag = Geometry::
-            line_line_intersect(p1,p2,line->p1,line->p2,line->norm,dum3,param,side);
-          if(hitflag) {
-            printf("param: %4.3e; side: %i\n", param, side);
-
-            // inside then p1 is inside
-            if(side) {
-              
-            // outside then p1 is outside
-            } else {
-
-            }
-          }
-        } else {
-          tri = &tris[isurf];
-          //hitflag = Geometry::
-          //  line_tri_intersect(p1,p2,tri->p1,tri->p2,tri->p3,
-          //                     tri->norm,dum3,param,side);
-		    }
-      }
-
-      // simple mark in and out
-			grid->point_outside_surfs(icell, xo);
-			ioc = grid->outside_surfs(icell, p1, xo);
-      xyzcell = get_cxyz(ic,p1);
-      if(ioc) cvalues[xyzcell] = cin;
-      else cvalues[xyzcell] = cout;
-		}
-	}*/
 
   //error->one(FLERR,"check");
 	// find which ones are inside and which are outside

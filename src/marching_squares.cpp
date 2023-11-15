@@ -17,6 +17,8 @@
 #include "surf.h"
 #include "error.h"
 
+#define EPSILON 1.0
+
 using namespace SPARTA_NS;
 
 enum{UNKNOWN,OUTSIDE,INSIDE,OVERLAP};           // several files
@@ -286,8 +288,14 @@ void MarchingSquares::invoke(double **cvalues, int *svalues)
 
 double MarchingSquares::interpolate(double v0, double v1, double lo, double hi)
 {
-  double value = lo + (hi-lo)*(thresh-v0)/(v1-v0);
-  value = MAX(value,lo);
-  value = MIN(value,hi);
+  double value;
+  // if approximately equal
+  if(std::abs(v1-v0) < EPSILON) value = lo;
+  //else if(std::abs(v1-v0) > 255.0 - EPSILON) value = hi;
+  else {
+    value = lo + (hi-lo)*(thresh-v0)/(v1-v0);
+    value = MAX(value,lo);
+    value = MIN(value,hi);
+  }
   return value;
 }

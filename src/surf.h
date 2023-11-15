@@ -327,6 +327,7 @@ class Surf : protected Pointers {
   double xyzsize[3];       // size of lowest level cell (must be uniform grid)
   int nxyz[3], Nxyz;       // dimensions of grid
   double *cvalues;         // array of corner point values
+  int *ivalues;         // array of flag for intersections
   double **icvalues;       // reshaped cvalues for implicit surface generation
   int *tvalues;            // vector of per grid cell surf types
   class FixAblate *ablate; // ablate fix 
