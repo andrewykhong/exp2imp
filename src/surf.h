@@ -327,7 +327,8 @@ class Surf : protected Pointers {
   double xyzsize[3];       // size of lowest level cell (must be uniform grid)
   int nxyz[3], Nxyz;       // dimensions of grid
   double *cvalues;         // array of corner point values
-  int *ivalues;         // array of flag for intersections
+  double *pvalues;         // param values for points (where on edge surface hits)
+  int *ivalues;            // array of flag for intersections
   double **icvalues;       // reshaped cvalues for implicit surface generation
   int *tvalues;            // vector of per grid cell surf types
   class FixAblate *ablate; // ablate fix 
@@ -380,6 +381,11 @@ class Surf : protected Pointers {
 
   void find_intersections();
 	void set_corners();
+  void set_inter_inout(); // marks as either inside or outside
+  void set_inter_average();
+  // point, outside_point, triangle, min_d
+  int corner_hit2d(double*, double*, Line*, double, int);
+  int corner_hit3d(double*, double*, Tri*, double, int);
   void corner2cell();
   int get_cxyz(int *, double *);
   int get_cell(int, int, int);
