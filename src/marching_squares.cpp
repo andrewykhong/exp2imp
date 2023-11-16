@@ -290,12 +290,8 @@ double MarchingSquares::interpolate(double v0, double v1, double lo, double hi)
 {
   double value;
   // if approximately equal
-  if(std::abs(v1-v0) < EPSILON) value = lo;
-  else if(v1 == thresh) value = hi;
-  else {
-    value = lo + (hi-lo)*(thresh-v0)/(v1-v0);
-    value = MAX(value,lo);
-    value = MIN(value,hi);
-  }
+  value = lo + (hi-lo)*(thresh-v0)/(v1-v0);
+  value = MAX(value,lo);
+  value = MIN(value,hi);
   return value;
 }

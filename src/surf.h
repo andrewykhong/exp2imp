@@ -382,10 +382,10 @@ class Surf : protected Pointers {
   void find_intersections();
 	void set_corners();
   void set_inter_inout(); // marks as either inside or outside
-  void set_inter_average();
+  void set_inter_ave2d();
   // point, outside_point, triangle, min_d
-  int corner_hit2d(double*, double*, Line*, double, int);
-  int corner_hit3d(double*, double*, Tri*, double, int);
+  int corner_hit2d(double*, double*, Line*, double, int &);
+  int corner_hit3d(double*, double*, Tri*, double, int &);
   void corner2cell();
   int get_cxyz(int *, double *);
   int get_cell(int, int, int);

@@ -4612,7 +4612,7 @@ void Surf::set_inter_inout()
       // determine
       double ddum; // point of intersection as fraction along p1->p2
       int idum, hitflag, nhit; // was hit inside or outside?
-      int cornerflag;
+      int onsurf;
       // side = 0,1 = OUTSIDE,INSIDE
       double d3dum[3];
 
@@ -4623,18 +4623,18 @@ void Surf::set_inter_inout()
 
       // test all surfs+corners to see if any hit
       nhit = 0;
-      cornerflag = 0;
+      onsurf = 0;
 
       for (int m = 0; m < nsurf; m++) {
         isurf = csurfs[m];
 
 		    if(domain->dimension == 2) {
           line = &lines[isurf];
-          hitflag = corner_hit2d(p1, xo, line, mind, cornerflag);
+          hitflag = corner_hit2d(p1, xo, line, mind, onsurf);
           if(hitflag) nhit++;
         } else {
           tri = &tris[isurf];
-          hitflag = corner_hit3d(p1, xo, tri, mind, cornerflag);
+          hitflag = corner_hit3d(p1, xo, tri, mind, onsurf);
           if(hitflag) nhit++;
 		    } // end "if" for dimension
       }// end "for" for surfaces
@@ -4642,7 +4642,7 @@ void Surf::set_inter_inout()
       xyzcell = get_corner(p1[0], p1[1], p1[2]);
 
       // if corner, have slight below threshold
-      if(cornerflag) cvalues[xyzcell] = thresh;// - EPSILON_GRID;
+      if(onsurf) cvalues[xyzcell] = thresh + EPSILON_GRID;
       else if(nhit%2) cvalues[xyzcell] = cin;
       else cvalues[xyzcell] = cout;
 		}// end "for" for corners in cell
@@ -4657,7 +4657,7 @@ void Surf::set_inter_inout()
    as the averge of the cvalues needed to get an exact representation
 ------------------------------------------------------------------------- */
 
-void Surf::set_inter_average()
+void Surf::set_inter_ave2d()
 {
   Grid::ChildCell *cells = grid->cells;
   Grid::ChildInfo *cinfo = grid->cinfo;
@@ -4710,18 +4710,18 @@ void Surf::set_inter_average()
 }
 
 /* ----------------------------------------------------------------------
-	 Determines if surface is inline with the cell edge
+	 Determines if surface is inline with cell edge. Onsurf input should be 
+   false. Onsurf can only be set to true or unchanged
 ------------------------------------------------------------------------- */
 
 int Surf::corner_hit2d(double *p, double *xo,
-    Line* line, double mind, int cornerflag)
+    Line* line, double mind, int &onsurf)
 {
   double pm[3], pp[3];
   double d3dum[3], ddum;
   int idum;
   int hitflag;
   int nhit = 0;
-  cornerflag = 0;
 
   // slightly perturb corner to handle amibiguity where surface intersect
   // ... corner
@@ -4739,23 +4739,22 @@ int Surf::corner_hit2d(double *p, double *xo,
   // if only pm or pp hits, it's a corner
   // also count nhits. if even or zero, outside; else, inside.
   if(hitflag) {
-    nhit++;
+    nhit = 1;
     hitflag = Geometry::
       line_line_intersect(pp,xo,line->p1,line->p2,line->norm,d3dum,ddum,idum);
     if(!hitflag) {
-      cornerflag = 1;
+      onsurf = 1;
     }
   } else {
     hitflag = Geometry::
       line_line_intersect(pp,xo,line->p1,line->p2,line->norm,d3dum,ddum,idum);
     if(hitflag) {
-      cornerflag = 1;
-      nhit++;
+      onsurf = 1;
+      nhit = 1;
     }
   }
 
-  if(!nhit) return 0;
-  else return 1;
+  return nhit;
 }
 
 /* ----------------------------------------------------------------------
@@ -4763,14 +4762,13 @@ int Surf::corner_hit2d(double *p, double *xo,
 ------------------------------------------------------------------------- */
 
 int Surf::corner_hit3d(double *p, double *xo,
-    Tri* tri, double mind, int cornerflag)
+    Tri* tri, double mind, int &onsurf)
 {
   double pm[3], pp[3];
   double d3dum[3], ddum;
   int idum;
   int hitflag;
   int nhit = 0;
-  cornerflag = 0;
 
   // slightly perturb corner to handle amibiguity where surface intersect
   // ... corner
@@ -4792,14 +4790,14 @@ int Surf::corner_hit3d(double *p, double *xo,
       line_tri_intersect(pp,xo,tri->p1,tri->p2,tri->p3,
                        tri->norm,d3dum,ddum,idum);
     if(!hitflag) {
-      cornerflag = 1;
+      onsurf = 1;
     }
   } else {
     hitflag = Geometry::
       line_tri_intersect(pp,xo,tri->p1,tri->p2,tri->p3,
                        tri->norm,d3dum,ddum,idum);
     if(hitflag) {
-      cornerflag = 1;
+      onsurf = 1;
       nhit++;
     }
   } // end "if" for hitflag
