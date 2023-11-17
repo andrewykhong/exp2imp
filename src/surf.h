@@ -321,7 +321,7 @@ class Surf : protected Pointers {
 
 	// For generating implicit surfaces
 	int ggroup;							 // group of grid cells implicit surface is contained within
-  int cpushflag;            // push to max / min corner values
+  int cpushflag;           // push to max / min corner values
 	double thresh;           // lower threshold for corner values
   double corner[3];        // corners of grid group
   double xyzsize[3];       // size of lowest level cell (must be uniform grid)
@@ -331,6 +331,7 @@ class Surf : protected Pointers {
   int *ivalues;            // array of flag for intersections
   double **icvalues;       // reshaped cvalues for implicit surface generation
   int *tvalues;            // vector of per grid cell surf types
+  int inoutFlag;           // flag for how corners in unknown cells are set
   class FixAblate *ablate; // ablate fix 
 
   // private methods
@@ -383,6 +384,7 @@ class Surf : protected Pointers {
 	void set_corners();
   void set_inter_inout(); // marks as either inside or outside
   void set_inter_ave2d();
+  void set_inter_ave3d();
   // point, outside_point, triangle, min_d
   int corner_hit2d(double*, double*, Line*, double, int &);
   int corner_hit3d(double*, double*, Tri*, double, int &);
@@ -391,6 +393,7 @@ class Surf : protected Pointers {
   int get_cell(int, int, int);
   int get_corner(int, int, int);
   int get_corner(double, double, double);
+  double extrapolate(double, double);
   void remove_2d(int);
   void remove_3d(int);
   class MarchingSquares *ms;
