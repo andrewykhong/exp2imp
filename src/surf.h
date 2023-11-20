@@ -331,7 +331,7 @@ class Surf : protected Pointers {
   int *ivalues;            // array of flag for intersections
   double **icvalues;       // reshaped cvalues for implicit surface generation
   int *tvalues;            // vector of per grid cell surf types
-  int inoutFlag;           // flag for how corners in unknown cells are set
+  int aveFlag;             // flag for how corners in unknown cells are set
   class FixAblate *ablate; // ablate fix 
 
   // private methods

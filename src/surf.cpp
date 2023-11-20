@@ -46,7 +46,7 @@ enum{INT,DOUBLE};                      // several files
 #define DELTAMODEL 4
 #define EPSSQ 1.0e-12
 #define EPSILON_GRID 1.0e-3
-#define EPSSURF 2.0e-4
+#define EPSSURF 1.0e-4
 #define BIG 1.0e20
 #define MAXGROUP 32
 
@@ -265,8 +265,8 @@ void Surf::modify_params(int narg, char **arg)
         error->all(FLERR,"Read_surf group does not match fix ablate group");
 
       // temporary
-      if (strcmp(arg[iarg+4],"inout") == 0) inoutFlag = 1;
-      else if (strcmp(arg[iarg+4],"dev") == 0) inoutFlag = 0;
+      if (strcmp(arg[iarg+4],"inout") == 0) aveFlag = 0;
+      else if (strcmp(arg[iarg+4],"dev") == 0) aveFlag = 1;
       else error->all(FLERR,"Unknown surface corner setting called");
 
       nxyz[3]; // number of cells in each dimension
@@ -4488,9 +4488,9 @@ void Surf::set_corners()
     }
   }
 
-  if(inoutFlag) set_inter_inout();
-  else {
-    if(domain->dimension == 2)  set_inter_ave2d();
+  set_inter_inout();
+  if(aveFlag) {
+    //if(domain->dimension == 2)  set_inter_ave2d();
     //else set_inter_ave3d();
   }
 
@@ -4579,6 +4579,11 @@ void Surf::set_inter_inout()
     nsurf = cells[icell].nsurf;
     if(!nsurf) continue;
 
+    // only gives outside point wrt to one surface
+    // need to manually get outside point for each surface
+    int found = grid->point_outside_surfs(icell, xo);
+    if(!found) continue; // needs to be adjusted (refer to slide 3 with diamond)
+
 		// store cell corners
 		if(domain->dimension == 2) {
       cx[0] = cx[2] = cells[icell].lo[0];
@@ -4619,40 +4624,54 @@ void Surf::set_inter_inout()
       p1[2] = cz[i];
 
       // determine
-      double ddum; // point of intersection as fraction along p1->p2
-      int idum, hitflag, nhit; // was hit inside or outside?
+      // side --- which side of surface is in (in/out?)
+      // nhit --- how many hits on the inside of surface
+      // nsurfhit --- how many total surface hits
+      int side;
+      int nhit = 0;
+      int nsurfhit = 0; // was hit inside or outside?
       int onsurf;
-      // side = 0,1 = OUTSIDE,INSIDE
-      double d3dum[3];
-
-      // only gives outside point wrt to one surface
-      // need to manually get outside point for each surface
-      int found = grid->point_outside_surfs(icell, xo);
-      if(!found) continue; // needs to be adjusted (refer to slide 3 with diamond)
 
       // test all surfs+corners to see if any hit
-      nhit = 0;
       onsurf = 0;
+
+      xyzcell = get_corner(p1[0], p1[1], p1[2]);
 
       for (int m = 0; m < nsurf; m++) {
         isurf = csurfs[m];
 
 		    if(domain->dimension == 2) {
           line = &lines[isurf];
-          hitflag = corner_hit2d(p1, xo, line, mind, onsurf);
-          if(hitflag) nhit++;
+
+          for(int d = 0; d < 3; d++)
+            // displace slighly from midpoint along norm
+            // norms points to outside
+            xo[d] = (line->p1[d] + line->p2[d]) * 0.5 - line->norm[d] * mind * EPSSURF;
+            
+
+          // in = 1; out = 0; onsurf2out = 2; onsurf2in = 3
+          // last two should never be used
+          side = corner_hit2d(p1, xo, line, mind, onsurf);
+          if(side > 1) error->one(FLERR,"onsurf2out/in found");
+
+          // if no collision, side = -1
+          if(side==1) {
+            nhit++;
+            nsurfhit++;
+          } else if(side==0) nsurfhit++;
         } else {
           tri = &tris[isurf];
-          hitflag = corner_hit3d(p1, xo, tri, mind, onsurf);
-          if(hitflag) nhit++;
+          side = corner_hit3d(p1, xo, tri, mind, onsurf);
+          if(side) {
+            nhit++;
+            nsurfhit++;
+          } else if(!side) nsurfhit++;
 		    } // end "if" for dimension
       }// end "for" for surfaces
 
-      xyzcell = get_corner(p1[0], p1[1], p1[2]);
-
-      // if corner, have slight below threshold
+      // if corner, set slightly below threshold
       if(onsurf) cvalues[xyzcell] = thresh + EPSILON_GRID;
-      else if(nhit%2) cvalues[xyzcell] = cin;
+      else if(nhit==nsurfhit) cvalues[xyzcell] = cin;
       else cvalues[xyzcell] = cout;
 		}// end "for" for corners in cell
 	}// end "for" for grid cells
@@ -4785,15 +4804,19 @@ void Surf::set_inter_ave2d()
       p2[2] = cz[j];  
 
       double param; // point of intersection as fraction along p1->p2
-      int side, hitflag, nhit; // was hit inside or outside?
+
+      // side --- which side of surface is in (in/out?)
+      // nhit --- how many hits on the inside of surface
+      // nsurfhit --- how many total surface hits
+      int side;
+      int nhit = 0;
+      int nsurfhit = 0; // was hit inside or outside?
       int onsurf;
-      int nhitsurf;
+
       // side = 0,1 = OUTSIDE,INSIDE
       double d3dum[3];
 
       // test all surfs+corners to see if any hit
-      nhit = 0;
-      nhitsurf = 0;
       onsurf = 0;
 
       // get index for p1 and p2
@@ -4815,8 +4838,6 @@ void Surf::set_inter_ave2d()
         int visited = visit[{MIN(xyzp1,xyzp2),MAX(xyzp1,xyzp2)}];
 
         if(!visited && hitflag) {
-          nhitsurf++;
-
           // only need to record the inside points
           // p1->p2 hits inside of surface so 
           // ... p1 is inside
@@ -4838,14 +4859,19 @@ void Surf::set_inter_ave2d()
         } // end "if" for side
       }// end "for" for surfaces
 
+      if(xyzp1 == 33) {
+        printf("xyzcell: %i; nhit: %i; nsurf: %i\n", xyzp1, nhit, nsurf);
+      }
+
       // if nhit is zero, no points connected to 
-      if(onsurf) cvalues[xyzcell] = thresh + EPSILON_GRID;
-      else if(nhit==0) cvalues[xyzp1] =  cout;
-      else if(nhitsurf==0) cvalues[xyzp1] =  cin;
+      // NEED TO DOUBLE CHECK THIS LOGIC
+      if(onsurf) cvalues[xyzp1] = thresh + EPSILON_GRID;
+      else if(nhit%2) cvalues[xyzp1] =  cin; // possible inconsistency here
+      else cvalues[xyzp1] =  cout;
 
 		}// end "for" for corners in cell
 	}// end "for" for grid cells
-
+  //error->one(FLERR,"check");
 
   // first determine the intersection values/count for each corner
 	for(int icell = 0; icell < grid->nlocal; icell++) {
@@ -4886,9 +4912,10 @@ void Surf::set_inter_ave2d()
       p1[1] = cy[i];
       p1[2] = cz[i];
       xyzcell = get_corner(p1[0], p1[1], p1[2]);
-
-      /*printf("c: %i; p: %4.3e; i: %i\n",
-        xyzcell, pvalues[xyzcell], ivalues[xyzcell]);*/
+      if(xyzcell == 33) {
+        printf("xyzcell: %i; ivalues[xyzcell]: %i\n", xyzcell, ivalues[xyzcell]);
+        printf("extra: %4.3e\n", extrapolate(pvalues[xyzcell]/ivalues[xyzcell],0.0) );
+      }
       if(ivalues[xyzcell] == 0) continue; // already handled in previous loop
       else cvalues[xyzcell] = extrapolate(pvalues[xyzcell]/ivalues[xyzcell],0.0);
       /*if(ivalues[xyzcell] > 0) {
@@ -4896,9 +4923,8 @@ void Surf::set_inter_ave2d()
           xyzcell, pvalues[xyzcell]/ivalues[xyzcell], cvalues[xyzcell]);
       }*/
     }
-
 	}// end "for" for grid cells
-
+  error->one(FLERR,"check");
 	return;
 }
 
@@ -4929,12 +4955,13 @@ int Surf::corner_hit2d(double *p, double *xo,
 {
   double pm[3], pp[3];
   double d3dum[3], ddum;
-  int idum;
+  int side;
   int hitflag;
-  int nhit = 0;
+  int out_side = -1;
 
   // slightly perturb corner to handle amibiguity where surface intersect
   // ... corner
+
   pm[0] = p[0] - EPSSURF * mind * line->norm[0];
   pm[1] = p[1] - EPSSURF * mind * line->norm[1];
   pm[2] = p[2] - EPSSURF * mind * line->norm[2];
@@ -4944,27 +4971,29 @@ int Surf::corner_hit2d(double *p, double *xo,
   pp[2] = p[2] + EPSSURF * mind * line->norm[2];
 
   hitflag = Geometry::
-    line_line_intersect(pm,xo,line->p1,line->p2,line->norm,d3dum,ddum,idum);
+    line_line_intersect(pm,xo,line->p1,line->p2,line->norm,d3dum,ddum,side);
 
   // if only pm or pp hits, it's a corner
   // also count nhits. if even or zero, outside; else, inside.
   if(hitflag) {
-    nhit = 1;
+    out_side = side;
     hitflag = Geometry::
-      line_line_intersect(pp,xo,line->p1,line->p2,line->norm,d3dum,ddum,idum);
+      line_line_intersect(pp,xo,line->p1,line->p2,line->norm,d3dum,ddum,side);
     if(!hitflag) {
       onsurf = 1;
     }
   } else {
     hitflag = Geometry::
-      line_line_intersect(pp,xo,line->p1,line->p2,line->norm,d3dum,ddum,idum);
+      line_line_intersect(pp,xo,line->p1,line->p2,line->norm,d3dum,ddum,side);
     if(hitflag) {
+      out_side = side;
       onsurf = 1;
-      nhit = 1;
     }
   }
 
-  return nhit;
+  // in = 1; out = 1; onsurf2out = 2; onsurf2in = 3
+  // last two should never be used
+  return out_side;
 }
 
 /* ----------------------------------------------------------------------
@@ -4976,9 +5005,9 @@ int Surf::corner_hit3d(double *p, double *xo,
 {
   double pm[3], pp[3];
   double d3dum[3], ddum;
-  int idum;
+  int side;
   int hitflag;
-  int nhit = 0;
+  int out_side = -1;
 
   // slightly perturb corner to handle amibiguity where surface intersect
   // ... corner
@@ -4992,28 +5021,27 @@ int Surf::corner_hit3d(double *p, double *xo,
 
   hitflag = Geometry::
     line_tri_intersect(pm,xo,tri->p1,tri->p2,tri->p3,
-                       tri->norm,d3dum,ddum,idum);
+                       tri->norm,d3dum,ddum,side);
 
   if(hitflag) {
-    nhit++;
+    out_side = side;
     hitflag = Geometry::
       line_tri_intersect(pp,xo,tri->p1,tri->p2,tri->p3,
-                       tri->norm,d3dum,ddum,idum);
+                       tri->norm,d3dum,ddum,side);
     if(!hitflag) {
       onsurf = 1;
     }
   } else {
     hitflag = Geometry::
       line_tri_intersect(pp,xo,tri->p1,tri->p2,tri->p3,
-                       tri->norm,d3dum,ddum,idum);
+                       tri->norm,d3dum,ddum,side);
     if(hitflag) {
+      out_side = side;
       onsurf = 1;
-      nhit++;
     }
   } // end "if" for hitflag
 
-  if(!nhit) return 0;
-  else return 1;
+  return out_side;
 }
 
 
