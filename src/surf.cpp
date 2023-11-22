@@ -32,6 +32,7 @@
 // for implicit
 #include "fix_ablate.h"
 #include "modify.h"
+#include "cut2d.h"
 
 using namespace SPARTA_NS;
 using namespace MathConst;
@@ -4411,8 +4412,9 @@ void Surf::set_corners()
   int ic[3], xyzcell;
   double lc[3];
 
-  double cout = 0.0;
-  double cin = 255.0;
+  cout = 0.0;
+  cin = 255.0;
+  cthresh = thresh + EPSILON_GRID;
 
   // debug
   //cout = thresh;
@@ -4488,11 +4490,17 @@ void Surf::set_corners()
     }
   }
 
-  set_inter_inout();
+  if(domain->dimension==2) set_surfcell2d();
+  //else set_surfcell3d();
   if(aveFlag) {
-    //if(domain->dimension == 2)  set_inter_ave2d();
+    if(domain->dimension == 2) set_inter_ave2d();
     //else set_inter_ave3d();
   }
+
+  /*for(int icell = 0; icell < Nxyz; icell++) {
+    printf("iNxyz: %i; cvalues: %2.1e\n", icell, cvalues[icell]);
+  }
+  error->one(FLERR,"check");*/
 
 	// store into icvalues for generating implicit surface
 	for(int icell = 0; icell < grid->nlocal; icell++) {
@@ -4521,9 +4529,12 @@ void Surf::set_corners()
       icvalues[icell][7] = cvalues[xyzcell]; 
     }
 
-    //printf("icell: %i; cval: %2.1e,%2.1e,%2.1e,%2.1e\n",
-    //        icell, icvalues[icell][0], icvalues[icell][1],
-    //        icvalues[icell][2], icvalues[icell][3]);
+    /*printf("icell: %i; cval: %2.1e,%2.1e,%2.1e,%2.1e,%2.1e,%2.1e,%2.1e,%2.1e\n",
+            icell,
+            icvalues[icell][0], icvalues[icell][1],
+            icvalues[icell][2], icvalues[icell][3],
+            icvalues[icell][4], icvalues[icell][5],
+            icvalues[icell][6], icvalues[icell][7]);*/
   }
   //error->one(FLERR,"check");
 	return;
@@ -4533,31 +4544,35 @@ void Surf::set_corners()
 	 Determines corner values for cells with surfaces as simply in or out
 ------------------------------------------------------------------------- */
 
-void Surf::set_inter_inout()
+void Surf::set_surfcell2d()
 {
   Grid::ChildCell *cells = grid->cells;
   Grid::ChildInfo *cinfo = grid->cinfo;
-	double xo[3]; // outside point
-	double cx[8], cy[8], cz[8]; // store all corners
+	double cx[4], cy[4], cz[4]; // store all corners
 	double p1[3], p2[3]; // corner coordinate
   double pp[3], pm[3];
-	int ioc; // flag if point is outside of inside surface
   int itype; // inside or outside cell?
   int ix, iy, iz;
-	double xc,yc,zc;
-	double xl[2], yl[2], zl[2];
+  double xi[3], xo[3];
 
   int hitflag, isurf, nsurf;
   Surf::Line *line;
   Surf::Line *lines = surf->lines;
-
-  Surf::Tri *tri;
-  Surf::Tri *tris = surf->tris;
   surfint *csurfs;
 
-	int ncorner;
-	if(domain->dimension == 2) ncorner = 4;
-	else ncorner = 8;
+	int ncorner = 4;
+  int scorner[ncorner];
+  // set up look up table for neighboring corners
+  int scornerx[ncorner], scornery[ncorner];
+  scornerx[0] = 1;
+  scornerx[1] = 0;
+  scornerx[2] = 3;
+  scornerx[3] = 2;
+
+  scornery[0] = 2;
+  scornery[1] = 3;
+  scornery[2] = 0;
+  scornery[3] = 1;
 
   double lo[3], hi[3];
   lo[0] = domain->boxhi[0];
@@ -4567,11 +4582,8 @@ void Surf::set_inter_inout()
   hi[1] = domain->boxlo[1];
   hi[2] = domain->boxlo[2];
 
-  int ic[3], xyzcell;
+  int ic[3], xyzcell, ncell;
   double lc[3];
-
-  double cout = 0.0;
-  double cin = 255.0;
 
 	for(int icell = 0; icell < grid->nlocal; icell++) {
 
@@ -4585,39 +4597,23 @@ void Surf::set_inter_inout()
     if(!found) continue; // needs to be adjusted (refer to slide 3 with diamond)
 
 		// store cell corners
-		if(domain->dimension == 2) {
-      cx[0] = cx[2] = cells[icell].lo[0];
-      cy[0] = cy[1] = cells[icell].lo[1];
+    cx[0] = cx[2] = cells[icell].lo[0];
+    cy[0] = cy[1] = cells[icell].lo[1];
 
-      cx[1] = cx[3] = cells[icell].hi[0];
-      cy[2] = cy[3] = cells[icell].hi[1];
+    cx[1] = cx[3] = cells[icell].hi[0];
+    cy[2] = cy[3] = cells[icell].hi[1];
 
-      // zero out z-direction
-      cz[0] = cz[1] = cz[2] = cz[3] = 0.0;
-		} else {
-      cx[0] = cx[2] = cx[4] = cx[6] = cells[icell].lo[0];
-      cy[0] = cy[1] = cy[4] = cy[5] = cells[icell].lo[1];
-      cz[0] = cz[1] = cz[2] = cz[3] = cells[icell].lo[2];
-
-      cx[1] = cx[3] = cx[5] = cx[7] = cells[icell].hi[0];
-      cy[2] = cy[3] = cy[6] = cy[7] = cells[icell].hi[1];
-      cz[4] = cz[5] = cz[6] = cz[7] = cells[icell].hi[2];
-		}
+    // zero out z-direction
+    cz[0] = cz[1] = cz[2] = cz[3] = 0.0;
 
     // smallest cell length
-    double mind;
-    if(domain->dimension == 2) {
-      mind = std::min(cells[icell].hi[0]-cells[icell].lo[0],
-                      cells[icell].hi[1]-cells[icell].lo[1]);
-    } else {
-      mind = std::min(cells[icell].hi[0]-cells[icell].lo[0],
-                      cells[icell].hi[1]-cells[icell].lo[1]);
-      mind = std::min(mind,
-                      cells[icell].hi[2]-cells[icell].lo[2]);
-    }
+    double mind = std::min(cells[icell].hi[0]-cells[icell].lo[0],
+                           cells[icell].hi[1]-cells[icell].lo[1]);
 
 		// determine corner values
     csurfs = cells[icell].csurfs;
+
+    // for each corner, find cell edge with surface collision
 		for(int i = 0; i < ncorner; i++) {
       p1[0] = cx[i];
       p1[1] = cy[i];
@@ -4627,55 +4623,107 @@ void Surf::set_inter_inout()
       // side --- which side of surface is in (in/out?)
       // nhit --- how many hits on the inside of surface
       // nsurfhit --- how many total surface hits
-      int side;
+      int iside,oside;
       int nhit = 0;
       int nsurfhit = 0; // was hit inside or outside?
       int onsurf;
 
-      // test all surfs+corners to see if any hit
+      // test all surfs+corners
+      // find the surface/corner collision with smallest normal length
+      // determines if point is inside or outside
       onsurf = 0;
-
       xyzcell = get_corner(p1[0], p1[1], p1[2]);
 
+      // still need to find closest surface in case multiple surfaces
+      // ... intersect the same cell edge
+      int side = -1;
+      double rmin, rhit;
+      rmin = 0.0;
       for (int m = 0; m < nsurf; m++) {
         isurf = csurfs[m];
+        line = &lines[isurf];
 
-		    if(domain->dimension == 2) {
-          line = &lines[isurf];
+        // try x-neighbor
+        if(p1[0] == cells[icell].lo[0]) p2[0] = cells[icell].hi[0];
+        else if(p1[0] == cells[icell].hi[0]) p2[0] = cells[icell].lo[0];
+        else error->one(FLERR,"equality doesn't work");
+        p2[1] = cy[i];
+        p2[2] = cz[i];
 
-          for(int d = 0; d < 3; d++)
-            // displace slighly from midpoint along norm
-            // norms points to outside
-            xo[d] = (line->p1[d] + line->p2[d]) * 0.5 - line->norm[d] * mind * EPSSURF;
-            
+        // out = 0; in = 1; onsurf2out = 2; onsurf2in = 3
+        // last two should never be returned
+        iside = corner_hit2d(p1, p2, line, mind, onsurf, rhit);
+        if((rhit < rmin && iside >= 0) || side == -1) {
+          rmin = rhit;
+          side = iside;
+        }
 
-          // in = 1; out = 0; onsurf2out = 2; onsurf2in = 3
-          // last two should never be used
-          side = corner_hit2d(p1, xo, line, mind, onsurf);
-          if(side > 1) error->one(FLERR,"onsurf2out/in found");
+        // try y-neighbor
+        if(p1[1] == cells[icell].lo[1]) p2[1] = cells[icell].hi[1];
+        else if(p1[1] == cells[icell].hi[1]) p2[1] = cells[icell].lo[1];
+        else error->one(FLERR,"equality doesn't work");
+        p2[0] = cx[i];
+        p2[2] = cz[i];
+        iside = corner_hit2d(p1, p2, line, mind, onsurf, rhit);
+        if((rhit < rmin && iside >= 0) || side == -1) {
+          rmin = rhit;
+          side = iside;
+        }
 
-          // if no collision, side = -1
-          if(side==1) {
-            nhit++;
-            nsurfhit++;
-          } else if(side==0) nsurfhit++;
-        } else {
-          tri = &tris[isurf];
-          side = corner_hit3d(p1, xo, tri, mind, onsurf);
-          if(side) {
-            nhit++;
-            nsurfhit++;
-          } else if(!side) nsurfhit++;
-		    } // end "if" for dimension
       }// end "for" for surfaces
 
-      // if corner, set slightly below threshold
-      if(onsurf) cvalues[xyzcell] = thresh + EPSILON_GRID;
-      else if(nhit==nsurfhit) cvalues[xyzcell] = cin;
-      else cvalues[xyzcell] = cout;
-		}// end "for" for corners in cell
-	}// end "for" for grid cells
+      // side = -1 means still unknown (handled in next loop)
+      scorner[i] = side;
 
+      // immediately set corner if known
+      if(scorner[i]==1) cvalues[xyzcell] = cin;
+      else if(scorner[i]==0) cvalues[xyzcell] = cout;
+		}// end "for" for corners in cell
+
+    // set unknown corners
+		for(int i = 0; i < ncorner; i++) {
+      if(scorner[i] >= 0) continue;
+
+      // since this corner has no intersections it
+      // .. must have same type as each of its neighbors
+      // free to choose any neighbor
+      else if(scorner[i]==-1) {
+        p1[0] = cx[i];
+        p1[1] = cy[i];
+        p1[2] = cz[i];
+        xyzcell = get_corner(p1[0], p1[1], p1[2]);
+
+        // check x-neighbor
+        if(scorner[scornerx[i]]>=0) {
+          if(p1[0] == cells[icell].lo[0]) p2[0] = cells[icell].hi[0];
+          else if(p1[0] == cells[icell].hi[0]) p2[0] = cells[icell].lo[0];
+          else error->one(FLERR,"equality doesn't work");
+          p2[1] = cy[i];
+          p2[2] = cz[i];
+          ncell = get_corner(p2[0], p2[1], p2[2]);
+          cvalues[xyzcell] = cvalues[ncell];
+
+          // temp
+          scorner[i] = scorner[scornerx[i]];
+        // check y-neighbor
+        } else if(scorner[scornery[i]]>=0) {
+          if(p1[1] == cells[icell].lo[1]) p2[1] = cells[icell].hi[1];
+          else if(p1[1] == cells[icell].hi[1]) p2[1] = cells[icell].lo[1];
+          else error->one(FLERR,"equality doesn't work");
+          p2[0] = cx[i];
+          p2[2] = cz[i];
+          ncell = get_corner(p2[0], p2[1], p2[2]);
+          cvalues[xyzcell] = cvalues[ncell];
+
+          // temp
+          scorner[i] = scorner[scornery[i]];
+        } else error->one(FLERR,"none of neighbors can be used");
+      }
+      else error->one(FLERR,"improper corner value");
+		}// end "for" for corners in cell
+
+	}// end "for" for grid cells
+  //error->one(FLERR,"check");
 	return;
 }
 
@@ -4689,13 +4737,12 @@ void Surf::set_inter_ave2d()
 {
   Grid::ChildCell *cells = grid->cells;
   Grid::ChildInfo *cinfo = grid->cinfo;
-	double xo[3]; // outside point
+	double xo[3], xi[3]; // outside/inside point
 	double cx[8], cy[8], cz[8]; // store all corners
 	double p1[3], p2[3]; // corner coordinate
   double pp[3], pm[3];
 	int ioc; // flag if point is outside of inside surface
   int itype; // inside or outside cell?
-  int ix, iy, iz;
 	double xc,yc,zc;
 	double xl[2], yl[2], zl[2];
 
@@ -4719,10 +4766,7 @@ void Surf::set_inter_ave2d()
 
   int ic[3], xyzcell, xyzp1, xyzp2;
   double lc[3];
-
-  double cout = 0.0;
-  double cin = 255.0;
-
+  //printf("in ave2d\n");
   // pvalues stores param from line_line_intersect or tri_line_intersect
   // ivalues stores number of intersection a corner value is a part of
   memory->create(pvalues,Nxyz,"surf:pvalues");
@@ -4732,16 +4776,19 @@ void Surf::set_inter_ave2d()
     ivalues[icorner] = 0;
   }
 
-  std::map<std::pair<int,int>, int> visit;
+  //printf("create map\n");
+  /*std::map<std::pair<int,int>, int> visit;
   for(int ic = 0; ic < Nxyz; ic++) {
     for(int jc = ic; jc < Nxyz; jc++) {
       visit[{MIN(ic,jc),MAX(ic,jc)}] = 0;
     }
-  }
+  }*/
 
+  //printf("find intersections\n");
   // first determine the intersection values/count for each corner
 	for(int icell = 0; icell < grid->nlocal; icell++) {
 
+    //printf("icell: %i\n", icell);
     // if no surfs, continue
     nsurf = cells[icell].nsurf;
     if(!nsurf) continue;
@@ -4829,15 +4876,12 @@ void Surf::set_inter_ave2d()
         // check which surface each segment intersects with
         line = &lines[isurf];
 
-        // determine if p1 is an exterior or interior point
-        hitflag = corner_hit2d(p1, xo, line, mind, onsurf);
-        if(hitflag) nhit++; // helps to find interior and exterior points
-
         hitflag = Geometry::line_line_intersect(p1,p2,line->p1,line->p2,
           line->norm,d3dum,param,side);
-        int visited = visit[{MIN(xyzp1,xyzp2),MAX(xyzp1,xyzp2)}];
+        //int visited = visit[{MIN(xyzp1,xyzp2),MAX(xyzp1,xyzp2)}];
 
-        if(!visited && hitflag) {
+        //if(!visited && hitflag) {
+        if(hitflag) {
           // only need to record the inside points
           // p1->p2 hits inside of surface so 
           // ... p1 is inside
@@ -4845,29 +4889,25 @@ void Surf::set_inter_ave2d()
             pvalues[xyzp1] += param;
             ivalues[xyzp1] += 1;
 
-            // other point is outside point
-            cvalues[xyzp2] = cout;
+            // do not need to set other point
+            // assumes that the outside points have a constant value
+            //cvalues[xyzp2] = cout;
 
           // else p2 is inside
           } else {
             pvalues[xyzp2] += (1.0-param);
             ivalues[xyzp2] += 1;
 
-            cvalues[xyzp1] = cout;
+            //cvalues[xyzp1] = cout;
           }
-          visit[{MIN(xyzp1,xyzp2),MAX(xyzp1,xyzp2)}] = 1;
+          //visit[{MIN(xyzp1,xyzp2),MAX(xyzp1,xyzp2)}] = 1;
         } // end "if" for side
       }// end "for" for surfaces
 
-      if(xyzp1 == 33) {
-        printf("xyzcell: %i; nhit: %i; nsurf: %i\n", xyzp1, nhit, nsurf);
-      }
-
-      // if nhit is zero, no points connected to 
-      // NEED TO DOUBLE CHECK THIS LOGIC
-      if(onsurf) cvalues[xyzp1] = thresh + EPSILON_GRID;
-      else if(nhit%2) cvalues[xyzp1] =  cin; // possible inconsistency here
-      else cvalues[xyzp1] =  cout;
+      // All in-out flagging done in set_inter_inout (always called)
+      //if(onsurf) cvalues[xyzp1] = thresh + EPSILON_GRID;
+      //else if(nhit%2) cvalues[xyzp1] =  cin; // possible inconsistency here
+      //else cvalues[xyzp1] =  cout;
 
 		}// end "for" for corners in cell
 	}// end "for" for grid cells
@@ -4912,19 +4952,13 @@ void Surf::set_inter_ave2d()
       p1[1] = cy[i];
       p1[2] = cz[i];
       xyzcell = get_corner(p1[0], p1[1], p1[2]);
-      if(xyzcell == 33) {
-        printf("xyzcell: %i; ivalues[xyzcell]: %i\n", xyzcell, ivalues[xyzcell]);
-        printf("extra: %4.3e\n", extrapolate(pvalues[xyzcell]/ivalues[xyzcell],0.0) );
-      }
+
       if(ivalues[xyzcell] == 0) continue; // already handled in previous loop
+      else if(cvalues[xyzcell] <= cthresh) continue; // do not touch outside corners
       else cvalues[xyzcell] = extrapolate(pvalues[xyzcell]/ivalues[xyzcell],0.0);
-      /*if(ivalues[xyzcell] > 0) {
-        printf("c: %i; p/i: %4.3e, v: %4.3e\n",
-          xyzcell, pvalues[xyzcell]/ivalues[xyzcell], cvalues[xyzcell]);
-      }*/
     }
 	}// end "for" for grid cells
-  error->one(FLERR,"check");
+
 	return;
 }
 
@@ -4950,48 +4984,68 @@ double Surf::extrapolate(double param, double v1)
    false. Onsurf can only be set to true or unchanged
 ------------------------------------------------------------------------- */
 
-int Surf::corner_hit2d(double *p, double *xo,
-    Line* line, double mind, int &onsurf)
+int Surf::corner_hit2d(double *p1, double *p2,
+    Line* line, double mind, int &onsurf, double &rhit)
 {
   double pm[3], pp[3];
-  double d3dum[3], ddum;
+  double p21[3];
+  double d3dum[3];
+  double param;
   int side;
   int hitflag;
   int out_side = -1;
 
-  // slightly perturb corner to handle amibiguity where surface intersect
-  // ... corner
-
-  pm[0] = p[0] - EPSSURF * mind * line->norm[0];
-  pm[1] = p[1] - EPSSURF * mind * line->norm[1];
-  pm[2] = p[2] - EPSSURF * mind * line->norm[2];
-
-  pp[0] = p[0] + EPSSURF * mind * line->norm[0];
-  pp[1] = p[1] + EPSSURF * mind * line->norm[1];
-  pp[2] = p[2] + EPSSURF * mind * line->norm[2];
-
   hitflag = Geometry::
-    line_line_intersect(pm,xo,line->p1,line->p2,line->norm,d3dum,ddum,side);
-
-  // if only pm or pp hits, it's a corner
-  // also count nhits. if even or zero, outside; else, inside.
+    line_line_intersect(p1,p2,line->p1,line->p2,line->norm,d3dum,param,side);
   if(hitflag) {
+
     out_side = side;
-    hitflag = Geometry::
-      line_line_intersect(pp,xo,line->p1,line->p2,line->norm,d3dum,ddum,side);
-    if(!hitflag) {
-      onsurf = 1;
-    }
+    p21[0] = p2[0]-p1[0];
+    p21[1] = p2[1]-p1[1];
+
+    rhit = sqrt(p21[0]*p21[0]+p21[1]*p21[1])*param;
+  // check if the point is right on surface
   } else {
+
+    // slightly perturb corner to handle amibiguity where surface intersect
+    // ... corner
+
+    pm[0] = p1[0] - EPSSURF * mind * line->norm[0];
+    pm[1] = p1[1] - EPSSURF * mind * line->norm[1];
+    pm[2] = p1[2] - EPSSURF * mind * line->norm[2];
+
+    pp[0] = p1[0] + EPSSURF * mind * line->norm[0];
+    pp[1] = p1[1] + EPSSURF * mind * line->norm[1];
+    pp[2] = p1[2] + EPSSURF * mind * line->norm[2];
+
     hitflag = Geometry::
-      line_line_intersect(pp,xo,line->p1,line->p2,line->norm,d3dum,ddum,side);
+      line_line_intersect(pm,p2,line->p1,line->p2,line->norm,d3dum,param,side);
+
+    // if only pm or pp hits, it's a corner
+    // also count nhits. if even or zero, outside; else, inside.
     if(hitflag) {
       out_side = side;
-      onsurf = 1;
+      p21[0] = p2[0]-p1[0];
+      p21[1] = p2[1]-p1[1];
+      rhit = sqrt(p21[0]*p21[0]+p21[1]*p21[1])*param;
+      hitflag = Geometry::
+        line_line_intersect(pp,p2,line->p1,line->p2,line->norm,d3dum,param,side);
+      if(!hitflag) {
+        onsurf = 1;
+      }
+    } else {
+      hitflag = Geometry::
+        line_line_intersect(pp,p2,line->p1,line->p2,line->norm,d3dum,param,side);
+      if(hitflag) {
+        out_side = side;
+        p21[0] = p2[0]-p1[0];
+        p21[1] = p2[1]-p1[1];
+        rhit = sqrt(p21[0]*p21[0]+p21[1]*p21[1])*param;
+        onsurf = 1;
+      }
     }
   }
-
-  // in = 1; out = 1; onsurf2out = 2; onsurf2in = 3
+  // out = 0; in = 1; onsurf2out = 2; onsurf2in = 3
   // last two should never be used
   return out_side;
 }
@@ -5001,7 +5055,7 @@ int Surf::corner_hit2d(double *p, double *xo,
 ------------------------------------------------------------------------- */
 
 int Surf::corner_hit3d(double *p, double *xo,
-    Tri* tri, double mind, int &onsurf)
+    Tri* tri, double mind, int &onsurf, double& rhit)
 {
   double pm[3], pp[3];
   double d3dum[3], ddum;

@@ -349,11 +349,15 @@ void ReadISurf::assign_corners(int n, bigint offset, uint8_t *ibuf, double *dbuf
       if (zeroflag) error->all(FLERR,"Grid boundary value != 0");
     }
 
-    // ncorner = 0,1,2,3,4,5,6,7 when corner point is
-    //   bottom-lower-left, bottom-lower-right,
-    //   bottom-upper-left, bottom-upper-right,
-    //   top-lower-left, top-lower-right, top-upper-left, top-upper-right
-    //   of cell
+    // ncorner = 0,1,2,3,4,5,6,7 when corner point is (z-y-x)
+    // [0] lo-lo-lo
+    // [1] lo-lo-hi
+    // [2] lo-hi-lo
+    // [3] lo-hi-hi
+    // [4] hi-lo-lo
+    // [5] hi-lo-hi
+    // [6] hi-hi-lo
+    // [7] hi-hi-hi
     // if test on cix,ciy,ciz excludes cells that are outside of grid block
 
     if (dim == 3) {
@@ -373,7 +377,11 @@ void ReadISurf::assign_corners(int n, bigint offset, uint8_t *ibuf, double *dbuf
         }
       }
 
-    // ncorner = 0,1,2,3 when corner point is
+    // ncorner = 0,1,2,3 when corner point is (y-x)
+    // [0] lo-lo
+    // [1] lo-hi
+    // [2] hi-lo
+    // [3] hi-hi
     //   lower-left, lower-right, upper-left, upper-right of cell
     // if test on cix,ciy excludes cells that are outside of grid block
 

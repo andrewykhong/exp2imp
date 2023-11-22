@@ -332,6 +332,8 @@ class Surf : protected Pointers {
   double **icvalues;       // reshaped cvalues for implicit surface generation
   int *tvalues;            // vector of per grid cell surf types
   int aveFlag;             // flag for how corners in unknown cells are set
+  double cin, cout;        // in and out corner values
+  double cthresh;          // threshold corner value
   class FixAblate *ablate; // ablate fix 
 
   // private methods
@@ -382,20 +384,23 @@ class Surf : protected Pointers {
 
   void find_intersections();
 	void set_corners();
-  void set_inter_inout(); // marks as either inside or outside
+  // marks as either inside or outside
+  void set_surfcell2d();
+  void set_surfcell3d();
   void set_inter_ave2d();
   void set_inter_ave3d();
   // point, outside_point, triangle, min_d
-  int corner_hit2d(double*, double*, Line*, double, int &);
-  int corner_hit3d(double*, double*, Tri*, double, int &);
+  int corner_hit2d(double*, double*, Line*, double, int &, double &);
+  int corner_hit3d(double*, double*, Tri*, double, int &, double &);
   void corner2cell();
   int get_cxyz(int *, double *);
   int get_cell(int, int, int);
   int get_corner(int, int, int);
   int get_corner(double, double, double);
-  double extrapolate(double, double);
   void remove_2d(int);
   void remove_3d(int);
+  double extrapolate(double, double);
+  double minDist(double*, Line*, double*, double*);
   class MarchingSquares *ms;
   class MarchingCubes *mc;
 };

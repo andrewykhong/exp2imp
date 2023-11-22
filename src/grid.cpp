@@ -2416,8 +2416,10 @@ int Grid::check_uniform_group(int igroup, int *nxyz,
   bigint bcount = count;
   MPI_Allreduce(&bcount,&allbcount,1,MPI_SPARTA_BIGINT,MPI_SUM,world);
 
-  if ((bigint) nxyz[0] * nxyz[1]*nxyz[2] != allbcount)
+  if ((bigint) nxyz[0] * nxyz[1]*nxyz[2] != allbcount && surf->implicit) {
+    printf("nxyz: %i, %i, %i; all: %i\n", nxyz[0], nxyz[1], nxyz[2], allbcount);
     error->all(FLERR,"Read_isurfs grid group is not a contiguous brick");
+  }
 
   return count;
 }
