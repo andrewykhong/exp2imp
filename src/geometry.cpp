@@ -22,7 +22,7 @@
 #define EPSSQNEG -1.0e-16
 #define EPSSELF 1.0e-6
 
-enum{OUTSIDE,INSIDE,ONSURF2OUT,ONSURF2IN};    // same as Update
+enum{OUTSIDE,INSIDE,ONSURF2OUT,ONSURF2IN,OUT2ONSURF,IN2ONSURF};    // same as Update
 
 namespace Geometry {
 
@@ -682,7 +682,13 @@ bool line_line_intersect(double *start, double *stop,
   // if start point is inside or outside then side = same
   // if particle started on line B, side = ONSURF OUT/IN based on dotstop
 
-  if (dotstart < 0.0) side = INSIDE;
+  if(dotstart == 0) {
+    if(dotstop > 0) side = ONSURF2OUT;
+    else side = ONSURF2IN;
+  } else if(dotstop == 0) {
+    if(dotstart > 0) side = OUT2ONSURF;
+    else side = IN2ONSURF;
+  } else if (dotstart < 0.0) side = INSIDE;
   else if (dotstart > 0.0) side = OUTSIDE;
   else if (dotstop > 0.0) side = ONSURF2OUT;
   else side = ONSURF2IN;
