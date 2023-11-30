@@ -4412,7 +4412,8 @@ void Surf::set_corners()
   int ic[3], xyzcell;
   double lc[3];
 
-  cout = thresh;
+  //cout = thresh - EPSILON_GRID;
+  cout = 0;
   cin = 255.0;
   cthresh = thresh + EPSILON_GRID;
 
@@ -4549,9 +4550,9 @@ void Surf::set_surfcell2d()
     }
   }*/
 
-  double mind; // minimum cell length
   double param; // point of intersection as fraction along p1->p2
   int side; // hit inside or outside
+  int onsurf; // handles surfaces very close to cell boundary
 
   // to check if surface and cell edge are parallel
 
@@ -4632,14 +4633,15 @@ void Surf::set_surfcell2d()
 
         // still ignore case where the cell-edge and surface are inline
         // other corners will handle
-        hitflag = Geometry::line_line_intersect(p1,p2,line->p1,line->p2,
-          line->norm,d3dum,param,side);
+        hitflag = corner_hit2d(p1, p2, line, param, side, onsurf);
+        //hitflag = Geometry::line_line_intersect(p1,p2,line->p1,line->p2,
+        //  line->norm,d3dum,param,side);
 
         if(hitflag) {
 
           intersect[MIN(xyzp1,xyzp2)][MAX(xyzp1,xyzp2)] = 1;
 
-          /*if(xyzp1 == 60 || xyzp2 == 60) { 
+          /*if(xyzp1 == 52 || xyzp2 == 52) { 
             printf("icell: %i; corner: %i; nsurf: %i\n", icell, i, nsurf);
             printf("line->p1: %4.3e, %4.3e, %4.3e\n", line->p1[0], line->p1[1], line->p1[2]);
             printf("line->p2: %4.3e, %4.3e, %4.3e\n", line->p2[0], line->p2[1], line->p2[2]);
@@ -4651,18 +4653,21 @@ void Surf::set_surfcell2d()
           }*/
 
           // p1 is inside (start)
-          // side = 1; start is inside and stop is outside
-          // side = 2; start is on surf and stop is outside
-          // side = 5; start is inside and stop is on surf
-          if(side == 1 || side == 2 || side == 5) {
+          if(side==1) {
+            ivalues[xyzp1] += 1;
+
             pvalues[xyzp1] += param; // only record inside
             //pvalues[xyzp2] += (1.0-param);
 
             // record minimum minimum param values
             if(mvalues[xyzp1] < 0 || param <= mvalues[xyzp1]) {
               mvalues[xyzp1] = param;
+
+              // on surface (set as inside)
+              if(onsurf && param < 0.5) svalues[xyzp1] = 3;
+              else if (svalues[xyzp1] == 3) 1; // do nothing
               // consistent output
-              if(svalues[xyzp1] == 1 || svalues[xyzp1] < 0) svalues[xyzp1] = 1;
+              else if(svalues[xyzp1] == 1 || svalues[xyzp1] < 0) svalues[xyzp1] = 1;
               // contradictory output (set to 2 to be handled later)
               else if(svalues[xyzp1] == 0 || svalues[xyzp1] > 1) {
                 if(param < EPSSURF) svalues[xyzp1] = 1; // point on surface
@@ -4671,29 +4676,34 @@ void Surf::set_surfcell2d()
             }
             if(mvalues[xyzp2] < 0 || (1.0-param) <= mvalues[xyzp2]) {
               mvalues[xyzp2] = (1.0-param);
-              if(svalues[xyzp2] == 0 || svalues[xyzp2] < 0) svalues[xyzp2] = 0;
+              // on surface (set as inside)
+              if(onsurf && (1.0-param) < 0.5) svalues[xyzp2] = 3;
+              else if(svalues[xyzp2] == 3) 1; // do nothing
+              else if(svalues[xyzp2] == 0 || svalues[xyzp2] < 0) svalues[xyzp2] = 0;
               else if(svalues[xyzp2] == 1 || svalues[xyzp2] > 1) {
                 if(1.0-param < EPSSURF) svalues[xyzp2] = 1;
                 else svalues[xyzp2] = 2;
               } else error->one(FLERR,"should not be here");
             }
 
+
             // record number of intersections
-            ivalues[xyzp1] += 1;
+            //ivalues[xyzp1] += 1;
+            //ivalues[xyzp2] += 1;
+          // p1 is outside (start)
+          } else if(side==0) {
             ivalues[xyzp2] += 1;
 
-          // p1 is outside (start)
-          // side = 0; start is outside and stop is inside
-          // side = 3; start is on surf and stop is inside
-          // side = 4; start is outside and stop is on surf
-          } else if(side == 0 || side == 3 || side == 4) {
             //pvalues[xyzp1] += param;
             pvalues[xyzp2] += (1.0-param); // only record inside
 
             // record minimum minimum param values
             if(mvalues[xyzp1] < 0 || param <= mvalues[xyzp1]) {
               mvalues[xyzp1] = param;
-              if(svalues[xyzp1] == 0 || svalues[xyzp1] < 0) svalues[xyzp1] = 0;
+              // on surface (set as inside)
+              if(onsurf && param < 0.5) svalues[xyzp1] = 3;
+              else if (svalues[xyzp1] == 3) 1; // do nothing
+              else if(svalues[xyzp1] == 0 || svalues[xyzp1] < 0) svalues[xyzp1] = 0;
               else if(svalues[xyzp1] == 1 || svalues[xyzp1] > 1) {
                 if(param < EPSSURF) svalues[xyzp1] = 1; // point on surface
                 else svalues[xyzp1] = 2; // point not on surface
@@ -4701,7 +4711,10 @@ void Surf::set_surfcell2d()
             }
             if(mvalues[xyzp2] < 0 || (1.0-param) <= mvalues[xyzp2]) {
               mvalues[xyzp2] = (1.0-param);
-              if(svalues[xyzp2] == 1 || svalues[xyzp2] < 0) svalues[xyzp2] = 1;
+              // on surface (set as inside)
+              if(onsurf && (1.0-param) < 0.5) svalues[xyzp2] = 1;
+              else if (svalues[xyzp2] == 3) 1; // do nothing
+              else if(svalues[xyzp2] == 1 || svalues[xyzp2] < 0) svalues[xyzp2] = 1;
               else if(svalues[xyzp2] == 0 || svalues[xyzp2] > 1) {
                 if(1.0-param < EPSSURF) svalues[xyzp2] = 1;
                 else svalues[xyzp2] = 2;
@@ -4709,15 +4722,17 @@ void Surf::set_surfcell2d()
             }
 
             // record number of intersections
-            ivalues[xyzp1] += 1;
-            ivalues[xyzp2] += 1;
+            //ivalues[xyzp1] += 1;
+            //ivalues[xyzp2] += 1;
           } else {
             error->one(FLERR,"ambiguous hit");
           } // end "if" for side
 
-          /*if(xyzp1 == 60 || xyzp2 == 60) { 
-            printf("p1: %i -- mvalues: %4.3e; svalues: %i\n", xyzp1, mvalues[xyzp1],svalues[xyzp1]);
-            printf("p2: %i -- mvalues: %4.3e; svalues: %i\n\n", xyzp2, mvalues[xyzp2],svalues[xyzp2]);
+          /*if(xyzp1 == 52 || xyzp2 == 52) { 
+            //printf("p1: %i -- mvalues: %4.3e; svalues: %i\n", xyzp1, mvalues[xyzp1],svalues[xyzp1]);
+            //printf("p2: %i -- mvalues: %4.3e; svalues: %i\n\n", xyzp2, mvalues[xyzp2],svalues[xyzp2]);
+            printf("p1: %i -- pvalues: %4.3e; ivalues: %i\n", xyzp1, pvalues[xyzp1],ivalues[xyzp1]);
+            printf("p2: %i -- pvalues: %4.3e; ivalues: %i\n\n", xyzp2, pvalues[xyzp2],ivalues[xyzp2]);
           }*/
 
         } // end "if" for hitflag
@@ -4726,6 +4741,18 @@ void Surf::set_surfcell2d()
 		}// end "for" for corners in cellfe
     //if(icell > 50) error->one(FLERR,"check");
 	}// end "for" for grid cells
+
+  // set known corners thus far
+  for(int i = 0; i < Nxyz; i++) {
+    if(svalues[i] == 0) cvalues[i] = cout;
+    else if(svalues[i] == 1) cvalues[i] = cin;
+    // corner point on surface
+    else if(svalues[i] == 3) cvalues[i] = cthresh;
+  }
+
+  /*for(int i = 34; i < 222; i++)
+    printf("c: %i; svalue: %i\n", i, svalues[i]);
+  error->one(FLERR,"check");*/
 
   // now set in/out dependent on cell type
 	// only set those where svalues < 0 to avoid
@@ -4879,26 +4906,396 @@ void Surf::set_surfcell2d()
     error->one(FLERR,"cannot find reference");
   }
 
-  //for(int i = 0; i < Nxyz; i++)
-  //  printf("c: %i; svalue: %i\n", i, svalues[i]);
+  /*for(int i = 0; i < Nxyz; i++)
+    printf("c: %i; svalue: %i\n", i, svalues[i]);*/
 
   //error->one(FLERR,"check");
 
   if(aveFlag) {
 	  for(int i = 0; i < Nxyz; i++) {
       if(ivalues[i] == 0) continue; // already handled earlier
+      else if(svalues[i] == 0) continue; // ignore outside points
+      else if(svalues[i] == 3) continue; // corner point on surface
       else cvalues[i] = extrapolate(pvalues[i]/ivalues[i],0.0);
-      printf("cvalues[i]: %4.3e\n", cvalues[i]);
-	  }// end "for" for grid cells
-  } else {
-	  for(int i = 0; i < Nxyz; i++) {
-      if(ivalues[i] == 0) continue; // already handled in set_inter
-      printf("cvalues[i]: %4.3e\n", cvalues[i]);
+      //printf("ic: %i; p: %4.3e; i: %i; c: %4.3e\n", i, pvalues[i], ivalues[i], cvalues[i]);
 	  }// end "for" for grid cells
   }
-  error->one(FLERR,"check");
+
+  //for(int i = 0; i < Nxyz; i++)
+  //  printf("c: %i; cvalue: %4.3e\n", i, cvalues[i]);
+
+  //error->one(FLERR,"check");
 	return;
 }
+
+/* ----------------------------------------------------------------------
+	 Determines if surface is inline with cell edge. Onsurf input should be 
+   false. Onsurf can only be set to true or unchanged
+------------------------------------------------------------------------- */
+double Surf::extrapolate(double param, double v1)
+{
+  double v0;
+  // param is proportional to cell length so 
+  // ... lo = 0; hi = 1
+  // trying to find v0
+  // param = (thresh  - v0) / (v1 - v0)
+  v0 = (thresh - v1*param) / (1.0 - param);
+  v0 = MAX(v0,thresh);
+  v0 = MIN(v0,255.0);
+  return v0;
+}
+
+/* ----------------------------------------------------------------------
+	 Determines if surface is inline with cell edge. Onsurf input should be 
+   false. Onsurf can only be set to true or unchanged
+------------------------------------------------------------------------- */
+
+int Surf::corner_hit2d(double *p1, double *p2,
+    Line *line, double &param, int &side, int &onsurf)
+{
+  onsurf = 0;
+
+  // try intersect first
+  int h, tside;
+  double tparam;
+  double d3dum[3];
+  h = Geometry::
+    line_line_intersect(p1,p2,line->p1,line->p2,line->norm,d3dum,tparam,tside);
+  if(h) {
+    if(tparam < EPSSURF || (1.0-tparam) < EPSSURF) onsurf = 1;
+    if(tside == 1 || tside == 2 || tside == 5) {
+      side = 1;
+      param = tparam;
+      return true;
+    } else {
+      side = 0;
+      param = tparam;
+      return true;
+    }
+  }
+
+  // if miss, maybe surface very close to corner/edge
+  onsurf = 1;
+
+  // perturb line end points around corner
+  double a0[3], a1[3], a2[3], a3[3];
+  double b0[3], b1[3], b2[3], b3[3]; 
+
+  for(int d = 0; d < 3; d++) {
+    if(d==0) {
+      a0[d] = line->p1[d] - mind*0.005;
+      a1[d] = line->p1[d] - mind*0.005;
+      a2[d] = line->p1[d] + mind*0.005;
+      a3[d] = line->p1[d] + mind*0.005;
+
+      b0[d] = line->p2[d] - mind*0.005;
+      b1[d] = line->p2[d] - mind*0.005;
+      b2[d] = line->p2[d] + mind*0.005;
+      b3[d] = line->p2[d] + mind*0.005;
+    } else if(d==1) {
+      a0[d] = line->p1[d] - mind*0.005;
+      a1[d] = line->p1[d] + mind*0.005;
+      a2[d] = line->p1[d] - mind*0.005;
+      a3[d] = line->p1[d] + mind*0.005;
+
+      b0[d] = line->p2[d] - mind*0.005;
+      b1[d] = line->p2[d] + mind*0.005;
+      b2[d] = line->p2[d] - mind*0.005;
+      b3[d] = line->p2[d] + mind*0.005;
+    } else {
+      a0[d] = line->p1[d];
+      a1[d] = line->p1[d];
+      a2[d] = line->p1[d];
+      a3[d] = line->p1[d];
+
+      b0[d] = line->p2[d];
+      b1[d] = line->p2[d];
+      b2[d] = line->p2[d];
+      b3[d] = line->p2[d];
+    }
+  }
+
+  
+  // try all sides
+  h = Geometry::
+    line_line_intersect(p1,p2,a0,b0,line->norm,d3dum,tparam,tside);
+  if(h) {
+    if(tside == 1 || tside == 2 || tside == 5) {
+      side = 1;
+      if(tparam<0.5) param = 0.0;
+      else param = 1.0;
+      return true;
+    } else {
+      side = 0;
+      if(tparam<0.5) param = 0.0;
+      else param = 1.0;
+      return true;
+    }
+  }
+
+  h = Geometry::
+    line_line_intersect(p1,p2,a1,b1,line->norm,d3dum,tparam,tside);
+  if(h) {
+    if(tside == 1 || tside == 2 || tside == 5) {
+      side = 1;
+      if(tparam<0.5) param = 0.0;
+      else param = 1.0;
+      return true;
+    } else {
+      side = 0;
+      if(tparam<0.5) param = 0.0;
+      else param = 1.0;
+      return true;
+    }
+  }
+
+  h = Geometry::
+    line_line_intersect(p1,p2,a2,b2,line->norm,d3dum,tparam,tside);
+  if(h) {
+    if(tside == 1 || tside == 2 || tside == 5) {
+      side = 1;
+      if(tparam<0.5) param = 0.0;
+      else param = 1.0;
+      return true;
+    } else {
+      side = 0;
+      if(tparam<0.5) param = 0.0;
+      else param = 1.0;
+      return true;
+    }
+  }
+
+  h = Geometry::
+    line_line_intersect(p1,p2,a3,b3,line->norm,d3dum,tparam,tside);
+  if(h) {
+    if(tside == 1 || tside == 2 || tside == 5) {
+      side = 1;
+      if(tparam<0.5) param = 0.0;
+      else param = 1.0;
+      return true;
+    } else {
+      side = 0;
+      if(tparam<0.5) param = 0.0;
+      else param = 1.0;
+      return true;
+    }
+  }
+
+
+  // true miss
+  return false;
+}
+
+/* ----------------------------------------------------------------------
+	 Determines if surface is inline with the cell edge
+------------------------------------------------------------------------- */
+
+int Surf::corner_hit3d(double *p, double *xo,
+    Tri* tri, double mind, int &onsurf, double& rhit)
+{
+  double pm[3], pp[3];
+  double d3dum[3], ddum;
+  int side;
+  int hitflag;
+  int out_side = -1;
+
+  // slightly perturb corner to handle amibiguity where surface intersect
+  // ... corner
+  pm[0] = p[0] - EPSSURF * mind * tri->norm[0];
+  pm[1] = p[1] - EPSSURF * mind * tri->norm[1];
+  pm[2] = p[2] - EPSSURF * mind * tri->norm[2];
+
+  pp[0] = p[0] + EPSSURF * mind * tri->norm[0];
+  pp[1] = p[1] + EPSSURF * mind * tri->norm[1];
+  pp[2] = p[2] + EPSSURF * mind * tri->norm[2];
+
+  hitflag = Geometry::
+    line_tri_intersect(pm,xo,tri->p1,tri->p2,tri->p3,
+                       tri->norm,d3dum,ddum,side);
+
+  if(hitflag) {
+    out_side = side;
+    hitflag = Geometry::
+      line_tri_intersect(pp,xo,tri->p1,tri->p2,tri->p3,
+                       tri->norm,d3dum,ddum,side);
+    if(!hitflag) {
+      onsurf = 1;
+    }
+  } else {
+    hitflag = Geometry::
+      line_tri_intersect(pp,xo,tri->p1,tri->p2,tri->p3,
+                       tri->norm,d3dum,ddum,side);
+    if(hitflag) {
+      out_side = side;
+      onsurf = 1;
+    }
+  } // end "if" for hitflag
+
+  return out_side;
+}
+
+
+/* ----------------------------------------------------------------------
+	 Determines corner values given an explicit surface. Cvalues then used
+	 later in ablate to create the implicit surfaces
+------------------------------------------------------------------------- */
+
+int Surf::get_cxyz(int *ic, double *lc)
+{
+
+  // find lower bounds
+  double lo[3];
+  lo[0] = domain->boxhi[0];
+  lo[1] = domain->boxhi[1];
+  lo[2] = domain->boxhi[2];
+
+  // shift by lower bounds
+  double lclo[3];
+  for(int d = 0; d < 3; d++) {
+    lclo[d] = lo[d] + lc[d];
+    ic[d] = static_cast<int> (std::round(lclo[d] / xyzsize[d]));
+  }
+
+  int icell = get_corner(ic[0], ic[1], ic[2]);
+
+  return icell;
+}
+
+/* ----------------------------------------------------------------------
+	 Get cell from coordinates
+------------------------------------------------------------------------- */
+
+int Surf::get_cell(int icx, int icy, int icz)
+{
+  int icell;
+  if(domain->dimension == 2) icell = icx + icy*nxyz[0];
+  else icell = icx + icy*nxyz[0] + icz*nxyz[0]*nxyz[1];
+
+  return icell;
+}
+
+/* ----------------------------------------------------------------------
+	 Get corner values from coordinates
+------------------------------------------------------------------------- */
+
+int Surf::get_corner(int icx, int icy, int icz)
+{
+  int icell;
+  if(domain->dimension == 2) icell = icx + icy*(nxyz[0]+1);
+  else icell = icx + icy*(nxyz[0]+1) + icz*(nxyz[0]+1)*(nxyz[1]+1);
+
+  return icell;
+}
+
+/* ----------------------------------------------------------------------
+	 Get corner values from coordinates
+------------------------------------------------------------------------- */
+
+int Surf::get_corner(double dcx, double dcy, double dcz)
+{
+  // find lower bounds
+  double lo[3];
+  lo[0] = domain->boxhi[0];
+  lo[1] = domain->boxhi[1];
+  lo[2] = domain->boxhi[2];
+
+  // shift by lower bounds
+  double lclo[3];
+  double ic[3];
+  double lc[3];
+  lc[0] = dcx;
+  lc[1] = dcy; 
+  lc[2] = dcz;
+  for(int d = 0; d < 3; d++) {
+    lclo[d] = lo[d] + lc[d];
+    ic[d] = static_cast<int> (std::round(lclo[d] / xyzsize[d]));
+  }
+
+  int icell;
+  if(domain->dimension == 2) icell = ic[0] + ic[1]*(nxyz[0]+1);
+  else icell = ic[0] + ic[1]*(nxyz[0]+1) + ic[2]*(nxyz[0]+1)*(nxyz[1]+1);
+
+  return icell;
+}
+
+/* ----------------------------------------------------------------------
+   remove all lines in surf group
+   condense data structures by removing deleted points & lines
+------------------------------------------------------------------------- */
+
+void Surf::remove_2d(int groupbit)
+{
+  int i;
+
+  // remove lines in group
+  Surf::Line *line;
+  int nline = nsurf;
+  int nbytes = sizeof(Surf::Line);
+
+  int n = 0;
+  for (i = 0; i < nline; i++) {
+    if (lines[i].mask & groupbit) continue;
+    if (i != n) memcpy(&lines[n],&lines[i],nbytes);
+    n++;
+  }
+  nsurf = nlocal = n;
+
+  // print stats after removal
+
+  int nline_remove = nline - nsurf;
+
+  if (comm->me == 0) {
+    if (screen) {
+      fprintf(screen,"  removed %d lines\n",nline_remove);
+      fprintf(screen,"  " BIGINT_FORMAT " lines remain\n",nsurf);
+    }
+    if (logfile) {
+      fprintf(logfile,"  removed %d lines\n",nline_remove);
+      fprintf(logfile,"  " BIGINT_FORMAT " lines remain\n",nsurf);
+    }
+  }
+}
+
+/* ----------------------------------------------------------------------
+   remove all triangles in surf group
+   condense data structures by removing deleted points & triangles
+------------------------------------------------------------------------- */
+
+void Surf::remove_3d(int groupbit)
+{
+  int i;
+
+  // remove triangles in group
+
+  Surf::Tri *tris = surf->tris;
+  int ntri = surf->nsurf;
+  int nbytes = sizeof(Surf::Tri);
+
+  int n = 0;
+  for (i = 0; i < ntri; i++) {
+    if (tris[i].mask & groupbit) continue;
+    if (i != n) memcpy(&tris[n],&tris[i],nbytes);
+    n++;
+  }
+
+  nsurf = nlocal = n;
+
+  // print stats after removal
+
+  int ntri_remove = ntri - nsurf;
+
+  if (comm->me == 0) {
+    if (screen) {
+      fprintf(screen,"  removed %d tris\n",ntri_remove);
+      fprintf(screen,"  " BIGINT_FORMAT " tris remain\n",nsurf);
+    }
+    if (logfile) {
+      fprintf(logfile,"  removed %d tris\n",ntri_remove);
+      fprintf(logfile,"  " BIGINT_FORMAT " tris remain\n",nsurf);
+    }
+  }
+}
+
 
 /* ----------------------------------------------------------------------
 	 Determines corner values for cells with surfaces as simply in or out
@@ -5334,394 +5731,4 @@ void Surf::set_surfcell2d()
 
 	return;
 }*/
-
-/* ----------------------------------------------------------------------
-	 Determines if surface is inline with cell edge. Onsurf input should be 
-   false. Onsurf can only be set to true or unchanged
-------------------------------------------------------------------------- */
-double Surf::extrapolate(double param, double v1)
-{
-  double v0;
-  // param is proportional to cell length so 
-  // ... lo = 0; hi = 1
-  // trying to find v0
-  // param = (thresh  - v0) / (v1 - v0)
-  v0 = (thresh - v1*param) / (1.0 - param);
-  v0 = MAX(v0,thresh);
-  v0 = MIN(v0,255.0);
-  return v0;
-}
-
-/* ----------------------------------------------------------------------
-	 Determines if surface is inline with cell edge. Onsurf input should be 
-   false. Onsurf can only be set to true or unchanged
-------------------------------------------------------------------------- */
-
-int Surf::corner_hit2d(double *p1, double *p2,
-    Line* line, double mind, int &onsurf, double &rhit)
-{
-  double l1m[3], l1p[3];
-  double l2m[3], l2p[3];
-  double p21[3];
-  double d3dum[3];
-  double param1, param2, param3;
-  int side1, side2, side3;
-  int out_side = -1;
-
-      // test
-      /*double a[3] = {0, 0, 0};
-      double b[3] = {1, 0, 0};
-      double c[3] = {0.5,0,0};
-      double d[3] = {1, 0, 0};
-      double n[3] = {0, 1, 0};
-      int hit = Geometry::
-        line_line_intersect(a,b,c,d,n,d3dum,param1,side1);
-      printf("hit: %i; side: %i; param: %4.3e\n", hit, param1, side1);
-
-      n[1] = -1;
-      hit = Geometry::
-        line_line_intersect(a,b,c,d,n,d3dum,param1,side1);
-      printf("ohit: %i; side: %i; param: %4.3e\n", hit, param1, side1);
-      error->one(FLERR,"check");*/
-
-  // find distance of p1 to surf (rhit * param1)
-  p21[0] = p2[0]-p1[0];
-  p21[1] = p2[1]-p1[1];
-  p21[2] = 0.0;
-  rhit = sqrt(p21[0]*p21[0]+p21[1]*p21[1]);
-
-  int cnorm[3];
-  cnorm[0] = p21[0]/rhit;
-  cnorm[1] = p21[1]/rhit;
-  cnorm[2] = 0.0;
-
-  // slightly perturb line along cell edge
-  for(int d = 0; d < 3; d++) {
-    l1m[d] = line->p1[d] - EPSSURF * mind * cnorm[d];
-    l1p[d] = line->p1[d] + EPSSURF * mind * cnorm[d];
-
-    l2m[d] = line->p2[d] - EPSSURF * mind * cnorm[d];
-    l2p[d] = line->p2[d] + EPSSURF * mind * cnorm[d];
-  }
-
-  int h1 = Geometry::
-    line_line_intersect(p1,p2,line->p1,line->p2,line->norm,d3dum,param1,side1);
-  int h2 = Geometry::
-    line_line_intersect(p1,p2,l1m,l2m,line->norm,d3dum,param2,side2);
-  int h3 = Geometry::
-    line_line_intersect(p1,p2,l1p,l2p,line->norm,d3dum,param3,side3);
-
-  int h = h1 + 2*h2 + 4*h3;
-
-  if(h1) {
-    out_side = side1;
-    rhit *= param1;
-  }
-
-  // surface is between p1 and p2
-  /*if(h == 7) {
-    out_side = side1;
-    rhit *= param1;
-
-  // surface only hits p1->p2 if not displaced
-  } else if(h == 1) {
-
-    // cut line
-    double l1[3], l2[3], l21[3];
-    for(int d = 0; d < 3; d++) {
-      l1[d]  = std::min(ch[d],line->p1[d]);
-      l1[d]  = std::max(cl[d],line->p1[d]);
-      l2[d]  = std::min(ch[d],line->p2[d]);
-      l2[d]  = std::max(cl[d],line->p2[d]);
-      l21[d] = l2[d] - l1[d];
-    }
-    double lmag = sqrt(l21[0]*l21[0]+l21[1]*l21[1]);
-    // surface overlaps entire cell edge
-    // will record as not hit in line_line_intersect
-    // subsequently, param = 0
-    if(std::abs(lmag-rhit) < EPSSURF) {
-      out_side = 1;
-      rhit *= 0.0;
-    } else {
-
-    }
-    error->one(FLERR,"same");
-
-  // lower displaced and original surface hits p1->p2
-  } else if(h == 3) {
-    out_side = side2;
-    rhit *= 1.0;
-
-  // upper displaced and original surface hits p1->p2
-  } else if(h == 5) {
-    out_side = side3;
-    rhit *= 0.0; 
-
-  // p1->p2 does not intersect surface
-  } else if(h == 0 || h == 2 || h == 4) {
-    return -1;
-
-  // other configuartions don't make sense
-  } else {
-    printf("h: %i; h1: %i; h2: %i; h3: %i\n", h, h1, h2, h3);
-    error->all(FLERR,"surface cannot be marked as either in or out");
-  }*/
-
-  // out = 0; in = 1; onsurf2out = 2; onsurf2in = 3
-  // last two should never be used
-  return out_side;
-
-  /*if(hitflag) {
-    out_side = side;
-
-    hitflag = Geometry::
-      line_line_intersect(p1p,p2p,line->p1,line->p2,line->norm,d3dum,param,side);
-    // if only one set of p1/p2 hits, then the surface is on cell edge/corner
-    if(!hitflag) {
-      onsurf = 1;
-      param =  0.0;
-      p21[0] = p2[0]-p1[0];
-      p21[1] = p2[1]-p1[1];
-      rhit = sqrt(p21[0]*p21[0]+p21[1]*p21[1])*param;
-
-    // if both sets hit, then the surface intersect is between p1-p2
-    } else {
-      onsurf = 0;
-
-      hitflag = Geometry::
-        line_line_intersect(p1,p2,line->p1,line->p2,line->norm,d3dum,param,side);
-
-      p21[0] = p2[0]-p1[0];
-      p21[1] = p2[1]-p1[1];
-      rhit = sqrt(p21[0]*p21[0]+p21[1]*p21[1])*param;
-
-    }
-  } else {
-    hitflag = Geometry::
-      line_line_intersect(p1p,p2p,line->p1,line->p2,line->norm,d3dum,param,side);
-    // if only one set of p1/p2 hits, then the surface is on cell edge/corner
-    if(hitflag) {
-      out_side = side;
-      onsurf = 0;
-      param = 1.0;
-      p21[0] = p2[0]-p1[0];
-      p21[1] = p2[1]-p1[1];
-      rhit = sqrt(p21[0]*p21[0]+p21[1]*p21[1])*param;
-    // if neither hits, surface doesn't hit
-    } else {
-      out_side = -1;
-      onsurf = 0;
-    }
-  }*/
-}
-
-/* ----------------------------------------------------------------------
-	 Determines if surface is inline with the cell edge
-------------------------------------------------------------------------- */
-
-int Surf::corner_hit3d(double *p, double *xo,
-    Tri* tri, double mind, int &onsurf, double& rhit)
-{
-  double pm[3], pp[3];
-  double d3dum[3], ddum;
-  int side;
-  int hitflag;
-  int out_side = -1;
-
-  // slightly perturb corner to handle amibiguity where surface intersect
-  // ... corner
-  pm[0] = p[0] - EPSSURF * mind * tri->norm[0];
-  pm[1] = p[1] - EPSSURF * mind * tri->norm[1];
-  pm[2] = p[2] - EPSSURF * mind * tri->norm[2];
-
-  pp[0] = p[0] + EPSSURF * mind * tri->norm[0];
-  pp[1] = p[1] + EPSSURF * mind * tri->norm[1];
-  pp[2] = p[2] + EPSSURF * mind * tri->norm[2];
-
-  hitflag = Geometry::
-    line_tri_intersect(pm,xo,tri->p1,tri->p2,tri->p3,
-                       tri->norm,d3dum,ddum,side);
-
-  if(hitflag) {
-    out_side = side;
-    hitflag = Geometry::
-      line_tri_intersect(pp,xo,tri->p1,tri->p2,tri->p3,
-                       tri->norm,d3dum,ddum,side);
-    if(!hitflag) {
-      onsurf = 1;
-    }
-  } else {
-    hitflag = Geometry::
-      line_tri_intersect(pp,xo,tri->p1,tri->p2,tri->p3,
-                       tri->norm,d3dum,ddum,side);
-    if(hitflag) {
-      out_side = side;
-      onsurf = 1;
-    }
-  } // end "if" for hitflag
-
-  return out_side;
-}
-
-
-/* ----------------------------------------------------------------------
-	 Determines corner values given an explicit surface. Cvalues then used
-	 later in ablate to create the implicit surfaces
-------------------------------------------------------------------------- */
-
-int Surf::get_cxyz(int *ic, double *lc)
-{
-
-  // find lower bounds
-  double lo[3];
-  lo[0] = domain->boxhi[0];
-  lo[1] = domain->boxhi[1];
-  lo[2] = domain->boxhi[2];
-
-  // shift by lower bounds
-  double lclo[3];
-  for(int d = 0; d < 3; d++) {
-    lclo[d] = lo[d] + lc[d];
-    ic[d] = static_cast<int> (std::round(lclo[d] / xyzsize[d]));
-  }
-
-  int icell = get_corner(ic[0], ic[1], ic[2]);
-
-  return icell;
-}
-
-/* ----------------------------------------------------------------------
-	 Get cell from coordinates
-------------------------------------------------------------------------- */
-
-int Surf::get_cell(int icx, int icy, int icz)
-{
-  int icell;
-  if(domain->dimension == 2) icell = icx + icy*nxyz[0];
-  else icell = icx + icy*nxyz[0] + icz*nxyz[0]*nxyz[1];
-
-  return icell;
-}
-
-/* ----------------------------------------------------------------------
-	 Get corner values from coordinates
-------------------------------------------------------------------------- */
-
-int Surf::get_corner(int icx, int icy, int icz)
-{
-  int icell;
-  if(domain->dimension == 2) icell = icx + icy*(nxyz[0]+1);
-  else icell = icx + icy*(nxyz[0]+1) + icz*(nxyz[0]+1)*(nxyz[1]+1);
-
-  return icell;
-}
-
-/* ----------------------------------------------------------------------
-	 Get corner values from coordinates
-------------------------------------------------------------------------- */
-
-int Surf::get_corner(double dcx, double dcy, double dcz)
-{
-  // find lower bounds
-  double lo[3];
-  lo[0] = domain->boxhi[0];
-  lo[1] = domain->boxhi[1];
-  lo[2] = domain->boxhi[2];
-
-  // shift by lower bounds
-  double lclo[3];
-  double ic[3];
-  double lc[3];
-  lc[0] = dcx;
-  lc[1] = dcy; 
-  lc[2] = dcz;
-  for(int d = 0; d < 3; d++) {
-    lclo[d] = lo[d] + lc[d];
-    ic[d] = static_cast<int> (std::round(lclo[d] / xyzsize[d]));
-  }
-
-  int icell;
-  if(domain->dimension == 2) icell = ic[0] + ic[1]*(nxyz[0]+1);
-  else icell = ic[0] + ic[1]*(nxyz[0]+1) + ic[2]*(nxyz[0]+1)*(nxyz[1]+1);
-
-  return icell;
-}
-
-/* ----------------------------------------------------------------------
-   remove all lines in surf group
-   condense data structures by removing deleted points & lines
-------------------------------------------------------------------------- */
-
-void Surf::remove_2d(int groupbit)
-{
-  int i;
-
-  // remove lines in group
-  Surf::Line *line;
-  int nline = nsurf;
-  int nbytes = sizeof(Surf::Line);
-
-  int n = 0;
-  for (i = 0; i < nline; i++) {
-    if (lines[i].mask & groupbit) continue;
-    if (i != n) memcpy(&lines[n],&lines[i],nbytes);
-    n++;
-  }
-  nsurf = nlocal = n;
-
-  // print stats after removal
-
-  int nline_remove = nline - nsurf;
-
-  if (comm->me == 0) {
-    if (screen) {
-      fprintf(screen,"  removed %d lines\n",nline_remove);
-      fprintf(screen,"  " BIGINT_FORMAT " lines remain\n",nsurf);
-    }
-    if (logfile) {
-      fprintf(logfile,"  removed %d lines\n",nline_remove);
-      fprintf(logfile,"  " BIGINT_FORMAT " lines remain\n",nsurf);
-    }
-  }
-}
-
-/* ----------------------------------------------------------------------
-   remove all triangles in surf group
-   condense data structures by removing deleted points & triangles
-------------------------------------------------------------------------- */
-
-void Surf::remove_3d(int groupbit)
-{
-  int i;
-
-  // remove triangles in group
-
-  Surf::Tri *tris = surf->tris;
-  int ntri = surf->nsurf;
-  int nbytes = sizeof(Surf::Tri);
-
-  int n = 0;
-  for (i = 0; i < ntri; i++) {
-    if (tris[i].mask & groupbit) continue;
-    if (i != n) memcpy(&tris[n],&tris[i],nbytes);
-    n++;
-  }
-
-  nsurf = nlocal = n;
-
-  // print stats after removal
-
-  int ntri_remove = ntri - nsurf;
-
-  if (comm->me == 0) {
-    if (screen) {
-      fprintf(screen,"  removed %d tris\n",ntri_remove);
-      fprintf(screen,"  " BIGINT_FORMAT " tris remain\n",nsurf);
-    }
-    if (logfile) {
-      fprintf(logfile,"  removed %d tris\n",ntri_remove);
-      fprintf(logfile,"  " BIGINT_FORMAT " tris remain\n",nsurf);
-    }
-  }
-}
 

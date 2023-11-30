@@ -335,6 +335,7 @@ class Surf : protected Pointers {
   double **icvalues;       // reshaped cvalues for implicit surface generation
   int *tvalues;            // vector of per grid cell surf types
   int aveFlag;             // flag for how corners in unknown cells are set
+  double mind;
   double cin, cout;        // in and out corner values
   double cthresh;          // threshold corner value
   double cl[3], ch[3];     // cell bounds
@@ -396,7 +397,7 @@ class Surf : protected Pointers {
   void set_inter_ave2d();
   void set_inter_ave3d();
   // point, outside_point, triangle, min_d
-  int corner_hit2d(double*, double*, Line*, double, int &, double &);
+  int corner_hit2d(double*, double*, Line*, double&, int&, int&);
   int corner_hit3d(double*, double*, Tri*, double, int &, double &);
   void corner2cell();
   int get_cxyz(int *, double *);
