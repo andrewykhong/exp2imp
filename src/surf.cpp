@@ -4389,16 +4389,6 @@ void Surf::set_corners()
 	double xl[2], yl[2], zl[2];
 
   int hitflag, isurf, nsurf;
-  Surf::Line *line;
-  Surf::Line *lines = surf->lines;
-
-  Surf::Tri *tri;
-  Surf::Tri *tris = surf->tris;
-  surfint *csurfs;
-
-	int ncorner;
-	if(domain->dimension == 2) ncorner = 4;
-	else ncorner = 8;
 
   double lo[3], hi[3];
   lo[0] = domain->boxhi[0];
@@ -4411,13 +4401,12 @@ void Surf::set_corners()
   int ic[3], xyzcell;
   double lc[3];
 
-  //cout = thresh - EPSILON_GRID;
   cout = 0;
   cin = 255.0;
   cthresh = thresh + 1.0;
 
   // debug
-  //cout = thresh;
+  //cout = thresh - EPSILON_GRID;
   //cin = 2.0*thresh;
   //cin = 1.0;
 
@@ -4425,11 +4414,8 @@ void Surf::set_corners()
   // intialize ivalues as not intersections
   for (int i = 0; i < Nxyz; i++) cvalues[i] = -1.0;
 
-  //if(domain->dimension==2) find_intersections2d();
-  //else find_intersections2d();
-
   if(domain->dimension==2) set_surfcell2d();
-  //else set_surfcell3d();
+  else set_surfcell3d();
 
 	// store into icvalues for generating implicit surface
 	for(int icell = 0; icell < grid->nlocal; icell++) {
@@ -4506,6 +4492,7 @@ void Surf::set_surfcell2d()
   }
 
   // array to keep track of which pairs have intersections
+  // TODO gets too big in 3D
   memory->create(intersect,Nxyz,Nxyz,"surf:intersect");
   for(int ic = 0; ic < Nxyz; ic++) {
     for(int jc = ic; jc < Nxyz; jc++) {
@@ -4822,6 +4809,465 @@ void Surf::set_surfcell2d()
 }
 
 /* ----------------------------------------------------------------------
+   Same as set_surfcell2d but for 3d
+------------------------------------------------------------------------- */
+
+void Surf::set_surfcell3d()
+{
+  Grid::ChildCell *cells = grid->cells;
+  Grid::ChildInfo *cinfo = grid->cinfo;
+	double cx[8], cy[8], cz[8]; // store all corners
+	double p1[3], p2[3]; // corner coordinate
+  int itype; // inside or outside cell?
+
+  int hitflag, isurf, nsurf;
+  Surf::Tri *tri;
+  Surf::Tri *tris = surf->tris;
+  surfint *csurfs;
+
+  // pvalues stores total param from line_line_intersect or tri_line_intersect
+  memory->create(pvalues,Nxyz,"surf:pvalues");
+  // ivalues stores number of intersection a corner value is a part of
+  memory->create(ivalues,Nxyz,"surf:ivalues");
+  // mvalues stores minimum param
+  memory->create(mvalues,Nxyz,"surf:mvalues");
+  // svalues stores side of minimum param
+  memory->create(svalues,Nxyz,"surf:svalues");
+
+	int ncorner = 8;
+  for(int icorner = 0; icorner < Nxyz; icorner++) {
+    pvalues[icorner] = 0.0;
+    ivalues[icorner] = 0;
+    svalues[icorner] = -1;
+    mvalues[icorner] = -1.0;
+  }
+
+  // array to keep track of which pairs have intersections
+  // TODO gets too big in 3D
+  memory->create(intersect,Nxyz,Nxyz,"surf:intersect");
+  for(int ic = 0; ic < Nxyz; ic++) {
+    for(int jc = ic; jc < Nxyz; jc++) {
+      intersect[MIN(ic,jc)][MAX(ic,jc)] = 0;
+    }
+  }
+
+  // indices correct
+	/*for(int icell = 0; icell < grid->nlocal; icell++) {
+    for(int d = 0; d < 3; d++) {
+      cl[d] = cells[icell].lo[d];
+      ch[d] = cells[icell].hi[d];
+    }
+
+		// store cell corners
+    cx[0] = cx[2] = cx[4] = cx[6] = cl[0];
+    cy[0] = cy[1] = cy[4] = cy[5] = cl[1];
+    cz[0] = cz[1] = cz[2] = cz[3] = cl[2];
+
+    cx[1] = cx[3] = cx[5] = cx[7] = ch[0];
+    cy[2] = cy[3] = cy[6] = cy[7] = ch[1];
+    cz[4] = cz[5] = cz[6] = cz[7] = ch[2];
+
+    printf("icell: %i\n", icell);
+		for(int i = 0; i < ncorner; i++) {
+      p1[0] = cx[i];
+      p1[1] = cy[i];
+      p1[2] = cz[i];
+      int xyz = get_corner(p1[0], p1[1], p1[2]);
+      printf("xyz: %i\n", xyz);
+    }
+    printf("\n");
+  }*/
+  //error->one(FLERR,"check indices");
+
+/*0--------------------------------------------------*/
+  double param; // point of intersection as fraction along p1->p2
+  int side; // hit inside or outside
+  int onsurf; // handles surfaces very close to cell boundary
+
+  // first determine the intersection values/count for each corner
+  int ic[3], xyzcell, xyzp1, xyzp2;
+	for(int icell = 0; icell < grid->nlocal; icell++) {
+
+    // if no surfs, continue
+    nsurf = cells[icell].nsurf;
+    if(!nsurf) continue;
+
+    for(int d = 0; d < 3; d++) {
+      cl[d] = cells[icell].lo[d];
+      ch[d] = cells[icell].hi[d];
+    }
+
+		// store cell corners
+    cx[0] = cx[2] = cx[4] = cx[6] = cl[0];
+    cy[0] = cy[1] = cy[4] = cy[5] = cl[1];
+    cz[0] = cz[1] = cz[2] = cz[3] = cl[2];
+
+    cx[1] = cx[3] = cx[5] = cx[7] = ch[0];
+    cy[2] = cy[3] = cy[6] = cy[7] = ch[1];
+    cz[4] = cz[5] = cz[6] = cz[7] = ch[2];
+
+    // smallest cell length
+    // should only have to do this once
+    mind = std::min(ch[0]-cl[0], ch[1]-cl[1]);
+    mind = std::min(mind,        ch[2]-cl[2]);
+
+		// determine corner values
+    csurfs = cells[icell].csurfs;
+
+/*-1-------------------------------------------------*/
+		for(int i = 0; i < ncorner; i++) {
+      p1[0] = cx[i];
+      p1[1] = cy[i];
+      p1[2] = cz[i];
+      xyzp1 = get_corner(p1[0], p1[1], p1[2]);
+      //printf("xyz: %i\n\n", xyzp1);
+
+/*--2------------------------------------------------*/
+      // each corner has 3 neighbors
+      for(int j = 0; j < 3; j++) {
+        for(int d = 0; d < 3; d++) p2[d] = p1[d];
+        if(p1[j]==cl[j]) p2[j]=ch[j];
+        else p2[j]=cl[j];
+        xyzp2 = get_corner(p2[0], p2[1], p2[2]);
+        // avoids double counting
+        if(xyzp2<xyzp1) continue;
+
+/*---3-----------------------------------------------*/
+        for (int m = 0; m < nsurf; m++) {
+          isurf = csurfs[m];
+          // check which surface each segment intersects with
+          tri = &tris[isurf];
+          // still ignore case where the cell-edge and surface are inline
+          // other corners will handle
+          hitflag = corner_hit3d(p1, p2, tri, param, side, onsurf);
+          // need to take care of values near machine precision
+          if(param < EPSSURF*mind) param = 0.0;
+          if((1.0-param) < EPSSURF*mind) param = 1.0;
+
+/*----4----------------------------------------------*/
+          // should not change for 3d
+          if(hitflag) {
+            intersect[MIN(xyzp1,xyzp2)][MAX(xyzp1,xyzp2)] = 1;
+
+            // p1 is inside (start)
+            if(side==1) {
+              ivalues[xyzp1] += 1;
+              pvalues[xyzp1] += param; // only record inside
+
+              // record minimum minimum param values
+              if(mvalues[xyzp1] < 0 || param <= mvalues[xyzp1]) {
+                mvalues[xyzp1] = param;
+
+                // on surface (set as inside)
+                if(onsurf && param < 0.5) svalues[xyzp1] = 3;
+                else if (svalues[xyzp1] == 3) 1; // do nothing
+                // consistent output
+                else if(svalues[xyzp1] == 1 || svalues[xyzp1] < 0) svalues[xyzp1] = 1;
+                // contradictory output (set to 2 to be handled later)
+                else if(svalues[xyzp1] == 0 || svalues[xyzp1] > 1) {
+                  if(param < EPSSURF) svalues[xyzp1] = 1; // point on surface
+                  else svalues[xyzp1] = 2; // point not on surface
+                } else error->one(FLERR,"should not be here");
+              }
+              if(mvalues[xyzp2] < 0 || (1.0-param) <= mvalues[xyzp2]) {
+                mvalues[xyzp2] = (1.0-param);
+                // on surface (set as inside)
+                if(onsurf && (1.0-param) < 0.5) svalues[xyzp2] = 3;
+                else if(svalues[xyzp2] == 3) 1; // do nothing
+                else if(svalues[xyzp2] == 0 || svalues[xyzp2] < 0) svalues[xyzp2] = 0;
+                else if(svalues[xyzp2] == 1 || svalues[xyzp2] > 1) {
+                  if(1.0-param < EPSSURF) svalues[xyzp2] = 1;
+                  else svalues[xyzp2] = 2;
+                } else error->one(FLERR,"should not be here");
+              }
+
+            // p1 is outside (start)
+            } else if(side==0) {
+              ivalues[xyzp2] += 1;
+              pvalues[xyzp2] += (1.0-param); // only record inside
+
+              // record minimum minimum param values
+              if(mvalues[xyzp1] < 0 || param <= mvalues[xyzp1]) {
+                mvalues[xyzp1] = param;
+                // on surface (set as inside)
+                if(onsurf && param < 0.5) svalues[xyzp1] = 3;
+                else if (svalues[xyzp1] == 3) 1; // do nothing
+                else if(svalues[xyzp1] == 0 || svalues[xyzp1] < 0) svalues[xyzp1] = 0;
+                else if(svalues[xyzp1] == 1 || svalues[xyzp1] > 1) {
+                  if(param < EPSSURF) svalues[xyzp1] = 1; // point on surface
+                  else svalues[xyzp1] = 2; // point not on surface
+                } else error->one(FLERR,"should not be here");
+              }
+              if(mvalues[xyzp2] < 0 || (1.0-param) <= mvalues[xyzp2]) {
+                mvalues[xyzp2] = (1.0-param);
+                // on surface (set as inside)
+                if(onsurf && (1.0-param) < 0.5) svalues[xyzp2] = 3;
+                else if (svalues[xyzp2] == 3) 1; // do nothing
+                else if(svalues[xyzp2] == 1 || svalues[xyzp2] < 0) svalues[xyzp2] = 1;
+                else if(svalues[xyzp2] == 0 || svalues[xyzp2] > 1) {
+                  if(1.0-param < EPSSURF) svalues[xyzp2] = 1;
+                  else svalues[xyzp2] = 2;
+                } else error->one(FLERR,"should not be here");
+              }
+            } else {
+              error->one(FLERR,"ambiguous hit");
+            } // end "if" for side
+
+            if(xyzp1 == 2 || xyzp2 == 2) {
+              printf("p1: %4.3e, %4.3e, %4.3e\n", p1[0], p1[1], p1[2]);
+              printf("p2: %4.3e, %4.3e, %4.3e\n", p2[0], p2[1], p2[2]);
+              printf("tri->p1: %4.3e, %4.3e, %4.3e\n",
+                tri->p1[0], tri->p1[1], tri->p1[2]);
+              printf("tri->p2: %4.3e, %4.3e, %4.3e\n",
+                tri->p2[0], tri->p2[1], tri->p2[2]);
+              printf("tri->p3: %4.3e, %4.3e, %4.3e\n",
+                tri->p3[0], tri->p3[1], tri->p3[2]);
+              printf("param: %4.3e; side: %i\n", param, side);
+              printf("pvalues: [%i] %4.3e; [%i] %4.3e\n\n",
+                xyzp1, pvalues[xyzp1], xyzp2, pvalues[xyzp2]);
+              error->one(FLERR,"check");
+            }
+
+          } // end "if" for hitflag
+/*----4----------------------------------------------*/
+        }// end "for" for surfaces
+/*---3-----------------------------------------------*/
+      }// end "for" for corner neighborrs
+/*--2------------------------------------------------*/
+      //printf("xyzp1: %i svalue: %i\n\n", xyzp1, svalues[xyzp1]);
+      //if(xyzp1 == 0) error->one(FLERR,"check");
+		}// end "for" for corners in cell
+/*-1-------------------------------------------------*/
+    //if(icell == 0) error->one(FLERR,"check");
+	}// end "for" for grid cells
+/*0--------------------------------------------------*/
+
+  /*for(int i = 0; i < Nxyz; i++)
+    printf("c: %i; svalue: %i; pvalue: %4.3e; ivalue %i\n",
+      i, svalues[i], pvalues[i], ivalues[i]);
+  error->one(FLERR,"check after corner");*/
+
+  // set known corners thus far
+  for(int i = 0; i < Nxyz; i++) {
+    if(svalues[i] == 0) cvalues[i] = cout;
+    else if(svalues[i] == 1) cvalues[i] = cin;
+    // corner point on surface
+    else if(svalues[i] == 3) cvalues[i] = cthresh;
+  }
+
+  // now set in/out dependent on cell type
+	// only set those where svalues < 0 to avoid
+  // .. overwriting corner points on cell edges which is handled above
+  double cval;
+  int sval;
+  double lc[3];
+	for(int icell = 0; icell < grid->nlocal; icell++) {
+
+    lc[0] = cells[icell].lo[0];
+    lc[1] = cells[icell].lo[1];
+    lc[2] = cells[icell].lo[2];
+    xyzcell = get_cxyz(ic,lc);
+
+    // itype = 1 - fully outside
+    // itype = 2 - fully inside
+    // itype = 3 - has surfaces
+    // cannot just use types, if surface on corner
+    // .. can be either 2 or 3 depending on which corner (ambiguity)
+    itype = cinfo[icell].type;
+
+    // fully inside so set all corner values to max
+    if(itype==2) {
+      cval = cin;
+      sval = 1;
+    // fully outside so set all corners to min
+    } else if (itype==1) {
+      cval = cout;
+      sval = 0;
+    } else {
+      continue;
+    }
+
+    // set corners if not already set (indicated by svalues)
+    if(svalues[xyzcell] < 0) {
+      cvalues[xyzcell] = cval;
+      svalues[xyzcell] = sval;
+    }
+    xyzcell = get_corner(ic[0]+1, ic[1], ic[2]);
+    if(svalues[xyzcell] < 0) {
+      cvalues[xyzcell] = cval;
+      svalues[xyzcell] = sval;
+    }
+    xyzcell = get_corner(ic[0], ic[1]+1, ic[2]);
+    if(svalues[xyzcell] < 0) {
+      cvalues[xyzcell] = cval;
+      svalues[xyzcell] = sval;
+    }
+    xyzcell = get_corner(ic[0]+1, ic[1]+1, ic[2]);
+    if(svalues[xyzcell] < 0) {
+      cvalues[xyzcell] = cval;
+      svalues[xyzcell] = sval;
+    }
+    xyzcell = get_corner(ic[0], ic[1], ic[2]+1);
+    if(svalues[xyzcell] < 0) {
+      cvalues[xyzcell] = cval;
+      svalues[xyzcell] = sval;
+    }
+    xyzcell = get_corner(ic[0]+1, ic[1], ic[2]+1);
+    if(svalues[xyzcell] < 0) {
+      cvalues[xyzcell] = cval;
+      svalues[xyzcell] = sval;
+    }
+    xyzcell = get_corner(ic[0], ic[1]+1, ic[2]+1);
+    if(svalues[xyzcell] < 0) {
+      cvalues[xyzcell] = cval;
+      svalues[xyzcell] = sval;
+    }
+    xyzcell = get_corner(ic[0]+1, ic[1]+1, ic[2]+1);
+    if(svalues[xyzcell] < 0) {
+      cvalues[xyzcell] = cval;
+      svalues[xyzcell] = sval;
+    }
+
+  }
+
+  //printf("from in/out\n");
+  //for(int i = 0; i < Nxyz; i++)
+  //  printf("c: %i; svalue: %i\n", i, svalues[i]);
+  //error->one(FLERR,"check after in/out");
+
+  // lastly handle ambiguous cases based on neighbors
+  // .. which do not intersect with a surface (intersect)
+
+  // TODO: add 2 more neighbors in z-direction
+
+  int filled = 0;
+  int j; // test neighbor
+  int attempt = 0;
+  int cremain = 0;
+  while(!filled) {
+    cremain = 0;
+    filled = 1;
+
+    for(int i = 0; i < Nxyz; i++) {
+      if(svalues[i] != 2 && svalues[i] != -1) continue;
+      //printf("\ni: %i; svalues: %i\n", i, svalues[i]);
+
+      // try x-neighbor
+      j = i - 1;
+      //printf("xn: %i\n", j);
+      if(j >= 0) {
+        if(!intersect[MIN(i,j)][MAX(i,j)] && svalues[j] >= 0) {
+          svalues[i] = svalues[j];
+          cvalues[i] = cvalues[j];
+          //printf("i: %i; svalues: %i\n\n", i, svalues[i]);
+          continue;
+        }
+      }
+
+      j = i + 1;
+      //printf("xn: %i\n", j);
+      if(j < Nxyz) {
+        if(!intersect[MIN(i,j)][MAX(i,j)] && svalues[j] >= 0) {
+          svalues[i] = svalues[j];
+          cvalues[i] = cvalues[j];
+          //printf("i: %i; svalues: %i\n\n", i, svalues[i]);
+          continue;
+        }
+      }
+
+      // try y-neighbor
+      j = i - (nxyz[0]+1);
+      //printf("yn: %i\n", j);
+      if(j >= 0) {
+        if(!intersect[MIN(i,j)][MAX(i,j)] && svalues[j] >= 0) {
+          svalues[i] = svalues[j];
+          cvalues[i] = cvalues[j];
+          //printf("i: %i; svalues: %i\n\n", i, svalues[i]);
+          continue;
+        }
+      }
+
+      j = i + (nxyz[0]+1);
+      //printf("yn: %i\n", j);
+      if(j < Nxyz) {
+        if(!intersect[MIN(i,j)][MAX(i,j)] && svalues[j] >= 0) {
+          svalues[i] = svalues[j];
+          cvalues[i] = cvalues[j];
+          //printf("i: %i; svalues: %i\n\n", i, svalues[i]);
+          continue;
+        }
+      }
+
+      // try z-neighbor
+      j = i - (nxyz[0]+1)*(nxyz[1]+1);
+      //printf("zn: %i\n", j);
+      if(j >= 0) {
+        if(!intersect[MIN(i,j)][MAX(i,j)] && svalues[j] >= 0) {
+          svalues[i] = svalues[j];
+          cvalues[i] = cvalues[j];
+          //printf("i: %i; svalues: %i\n\n", i, svalues[i]);
+          continue;
+        }
+      }
+
+      j = i + (nxyz[0]+1)*(nxyz[1]+1);
+      //printf("zn: %i\n", j);
+      if(j < Nxyz) {
+        if(!intersect[MIN(i,j)][MAX(i,j)] && svalues[j] >= 0) {
+          svalues[i] = svalues[j];
+          cvalues[i] = cvalues[j];
+          //printf("i: %i; svalues: %i\n\n", i, svalues[i]);
+          continue;
+        }
+      }
+      cremain++;
+      filled = 0;
+    }
+
+    printf("cremain: %i\n", cremain);
+    attempt++;
+    if(attempt>20) break;
+
+  }
+
+  if(!filled) {
+
+
+    error->one(FLERR,"cannot find reference easily");
+  }
+
+  //printf("from neighbor\n");
+  //for(int i = 0; i < Nxyz; i++)
+  //  printf("c: %i; svalue: %i\n", i, svalues[i]);
+  //error->one(FLERR,"check after neighbor");
+
+  // should be exactly same as 2D
+  if(aveFlag) {
+	  for(int i = 0; i < Nxyz; i++) {
+      if(ivalues[i] == 0) continue; // already handled earlier
+      else if(svalues[i] == 0) continue; // ignore outside points
+      else if(svalues[i] == 3) continue; // corner point on surface
+      else cvalues[i] = extrapolate(pvalues[i]/ivalues[i],0.0);
+	  }// end "for" for grid cells
+  }
+
+  /*printf("from ave\n");
+  for(int i = 0; i < Nxyz; i++)
+    printf("c: %i; pvalue: %4.3e; cvalue: %4.3e\n", i, pvalues[i], cvalues[i]);
+  error->one(FLERR,"check after ave");*/
+
+  // free up memory
+  memory->destroy(pvalues);
+  memory->destroy(ivalues);
+  memory->destroy(mvalues);
+  memory->destroy(svalues);
+  memory->destroy(intersect);
+
+  //error->one(FLERR,"check");
+	return;
+}
+
+/* ----------------------------------------------------------------------
 	 Determines if surface is inline with cell edge. Onsurf input should be 
    false. Onsurf can only be set to true or unchanged
 ------------------------------------------------------------------------- */
@@ -4884,40 +5330,6 @@ int Surf::corner_hit2d(double *p1, double *p2,
 
   zp[0] = zp[1] = zp[2] = zp[3] = 0.0;
 
-  /*for(int d = 0; d < 3; d++) {
-    if(d==0) {
-      a0[d] = line->p1[d] - mind*0.005;
-      a1[d] = line->p1[d] - mind*0.005;
-      a2[d] = line->p1[d] + mind*0.005;
-      a3[d] = line->p1[d] + mind*0.005;
-
-      b0[d] = line->p2[d] - mind*0.005;
-      b1[d] = line->p2[d] - mind*0.005;
-      b2[d] = line->p2[d] + mind*0.005;
-      b3[d] = line->p2[d] + mind*0.005;
-    } else if(d==1) {
-      a0[d] = line->p1[d] - mind*0.005;
-      a1[d] = line->p1[d] + mind*0.005;
-      a2[d] = line->p1[d] - mind*0.005;
-      a3[d] = line->p1[d] + mind*0.005;
-
-      b0[d] = line->p2[d] - mind*0.005;
-      b1[d] = line->p2[d] + mind*0.005;
-      b2[d] = line->p2[d] - mind*0.005;
-      b3[d] = line->p2[d] + mind*0.005;
-    } else {
-      a0[d] = line->p1[d];
-      a1[d] = line->p1[d];
-      a2[d] = line->p1[d];
-      a3[d] = line->p1[d];
-
-      b0[d] = line->p2[d];
-      b1[d] = line->p2[d];
-      b2[d] = line->p2[d];
-      b3[d] = line->p2[d];
-    }
-  }*/
-
   for(int i = 0; i < 4; i++) {
     p1p[0] = p1[0] + xp[i];
     p1p[1] = p1[1] + yp[i];
@@ -4944,106 +5356,82 @@ int Surf::corner_hit2d(double *p1, double *p2,
     }
   }
 
-  /*h = Geometry::
-    line_line_intersect(p1,p2,a1,b1,line->norm,d3dum,tparam,tside);
-  if(h) {
-    if(tside == 1 || tside == 2 || tside == 5) {
-      side = 1;
-      if(tparam<0.5) param = 0.0;
-      else param = 1.0;
-      return true;
-    } else {
-      side = 0;
-      if(tparam<0.5) param = 0.0;
-      else param = 1.0;
-      return true;
-    }
-  }
-
-  h = Geometry::
-    line_line_intersect(p1,p2,a2,b2,line->norm,d3dum,tparam,tside);
-  if(h) {
-    if(tside == 1 || tside == 2 || tside == 5) {
-      side = 1;
-      if(tparam<0.5) param = 0.0;
-      else param = 1.0;
-      return true;
-    } else {
-      side = 0;
-      if(tparam<0.5) param = 0.0;
-      else param = 1.0;
-      return true;
-    }
-  }
-
-  h = Geometry::
-    line_line_intersect(p1,p2,a3,b3,line->norm,d3dum,tparam,tside);
-  if(h) {
-    if(tside == 1 || tside == 2 || tside == 5) {
-      side = 1;
-      if(tparam<0.5) param = 0.0;
-      else param = 1.0;
-      return true;
-    } else {
-      side = 0;
-      if(tparam<0.5) param = 0.0;
-      else param = 1.0;
-      return true;
-    }
-  }*/
-
   // true miss
   return false;
 }
 
 /* ----------------------------------------------------------------------
-	 Determines if surface is inline with the cell edge
+	 Same as corner_hit2d but for 3d
 ------------------------------------------------------------------------- */
 
-int Surf::corner_hit3d(double *p, double *xo,
-    Tri* tri, double mind, int &onsurf, double& rhit)
+int Surf::corner_hit3d(double *p1, double *p2,
+    Tri* tri, double &param, int &side, int &onsurf)
 {
-  double pm[3], pp[3];
-  double d3dum[3], ddum;
-  int side;
-  int hitflag;
-  int out_side = -1;
+  onsurf = 0;
 
-  // slightly perturb corner to handle amibiguity where surface intersect
-  // ... corner
-  pm[0] = p[0] - EPSSURF * mind * tri->norm[0];
-  pm[1] = p[1] - EPSSURF * mind * tri->norm[1];
-  pm[2] = p[2] - EPSSURF * mind * tri->norm[2];
+  // try intersect first
+  int h, tside;
+  double tparam;
+  double d3dum[3];
+  h = Geometry::line_tri_intersect(p1,p2,tri->p1,tri->p2,tri->p3,
+      tri->norm,d3dum,tparam,tside);
 
-  pp[0] = p[0] + EPSSURF * mind * tri->norm[0];
-  pp[1] = p[1] + EPSSURF * mind * tri->norm[1];
-  pp[2] = p[2] + EPSSURF * mind * tri->norm[2];
-
-  hitflag = Geometry::
-    line_tri_intersect(pm,xo,tri->p1,tri->p2,tri->p3,
-                       tri->norm,d3dum,ddum,side);
-
-  if(hitflag) {
-    out_side = side;
-    hitflag = Geometry::
-      line_tri_intersect(pp,xo,tri->p1,tri->p2,tri->p3,
-                       tri->norm,d3dum,ddum,side);
-    if(!hitflag) {
-      onsurf = 1;
+  if(h) {
+    if(tparam < EPSSURF || (1.0-tparam) < EPSSURF) onsurf = 1;
+    if(tside == 1 || tside == 2 || tside == 5) {
+      side = 1;
+      param = tparam;
+      return true;
+    } else {
+      side = 0;
+      param = tparam;
+      return true;
     }
-  } else {
-    hitflag = Geometry::
-      line_tri_intersect(pp,xo,tri->p1,tri->p2,tri->p3,
-                       tri->norm,d3dum,ddum,side);
-    if(hitflag) {
-      out_side = side;
-      onsurf = 1;
-    }
-  } // end "if" for hitflag
+  }
 
-  return out_side;
+  // if miss, maybe surface very close to corner/edge
+  // perturbed points
+  double p1p[3];
+  double p2p[3];
+
+  double xp[8], yp[8], zp[8];
+  double dp = mind*0.005;
+  xp[0] = xp[2] = xp[4] = xp[6] = -dp;
+  yp[0] = yp[1] = yp[4] = yp[5] = -dp;
+  zp[0] = zp[1] = zp[2] = zp[3] = -dp;
+
+  xp[1] = xp[3] = xp[5] = xp[7] =  dp;
+  yp[2] = yp[3] = yp[6] = yp[7] =  dp;
+  zp[4] = zp[5] = zp[6] = zp[7] =  dp;
+
+  for(int i = 0; i < 8; i++) {
+    p1p[0] = p1[0] + xp[i];
+    p1p[1] = p1[1] + yp[i];
+    p1p[2] = p1[2] + zp[i];
+
+    p2p[0] = p2[0] + xp[i];
+    p2p[1] = p2[1] + yp[i];
+    p2p[2] = p2[2] + zp[i];
+ 
+    h = Geometry::line_tri_intersect(p1p,p2p,tri->p1,tri->p2,tri->p3,
+        tri->norm,d3dum,tparam,tside);
+    if(h) {
+      if(tparam < EPSSURF || (1.0-tparam) < EPSSURF) onsurf = 1;
+      if(tside == 1 || tside == 2 || tside == 5) {
+        side = 1;
+        param = tparam;
+        return true;
+      } else {
+        side = 0;
+        param = tparam;
+        return true;
+      }
+    }
+  }
+
+  // true miss
+  return false;
 }
-
 
 /* ----------------------------------------------------------------------
 	 Determines corner values given an explicit surface. Cvalues then used
