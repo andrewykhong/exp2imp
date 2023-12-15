@@ -189,6 +189,8 @@ FixAblate::FixAblate(SPARTA *sparta, int narg, char **arg) :
   tvalues = NULL;
   ncorner = size_per_grid_cols;
 
+  ivalues = NULL;
+
   // local storage
 
   ixyz = NULL;
@@ -256,6 +258,8 @@ FixAblate::~FixAblate()
   memory->destroy(sbuf);
   memory->destroy(vbuf);
 
+  memory->destroy(ivalues);
+
   delete ms;
   delete mc;
 
@@ -318,6 +322,93 @@ void FixAblate::store_corners(int nx_caller, int ny_caller, int nz_caller,
   for (int icell = 0; icell < nglocal; icell++) {
     for (int m = 0; m < ncorner; m++)
       cvalues[icell][m] = cvalues_caller[icell][m];
+    if (tvalues_flag) tvalues[icell] = tvalues_caller[icell];
+  }
+
+  // set ix,iy,iz indices from 1 to Nxyz for each of my owned grid cells
+  // same logic as ReadIsurf::create_hash()
+
+  for (int i = 0; i < nglocal; i++)
+    ixyz[i][0] = ixyz[i][1] = ixyz[i][2] = 0;
+
+  for (int icell = 0; icell < nglocal; icell++) {
+    if (!(cinfo[icell].mask & groupbit)) continue;
+    if (cells[icell].nsplit <= 0) continue;
+
+    ixyz[icell][0] =
+      static_cast<int> ((cells[icell].lo[0]-cornerlo[0]) / xyzsize[0] + 0.5) + 1;
+    ixyz[icell][1] =
+      static_cast<int> ((cells[icell].lo[1]-cornerlo[1]) / xyzsize[1] + 0.5) + 1;
+    ixyz[icell][2] =
+      static_cast<int> ((cells[icell].lo[2]-cornerlo[2]) / xyzsize[2] + 0.5) + 1;
+  }
+
+  // push corner pt values that are fully external/internal to 0 or 255
+
+  if (pushflag) push_lohi();
+  epsilon_adjust();
+
+  // create marching squares/cubes classes, now that have group & threshold
+
+  if (dim == 2) ms = new MarchingSquares(sparta,igroup,thresh);
+  else mc = new MarchingCubes(sparta,igroup,thresh);
+
+  // create implicit surfaces
+
+  create_surfs(1);
+}
+
+
+/* ----------------------------------------------------------------------
+   store grid edge intersection and type values in ivalues and tvalues
+   then create implicit surfaces
+   called by ReadIsurf when corner point grid is read in
+------------------------------------------------------------------------- */
+
+void FixAblate::store_intersections(int nx_caller, int ny_caller, int nz_caller,
+                              double *cornerlo_caller, double *xyzsize_caller,
+                              double **ivalues_caller, int *tvalues_caller,
+                              char *sgroupID)
+{
+  storeflag = 1;
+
+  nx = nx_caller;
+  ny = ny_caller;
+  nz = nz_caller;
+  cornerlo[0] = cornerlo_caller[0];
+  cornerlo[1] = cornerlo_caller[1];
+  cornerlo[2] = cornerlo_caller[2];
+  xyzsize[0] = xyzsize_caller[0];
+  xyzsize[1] = xyzsize_caller[1];
+  xyzsize[2] = xyzsize_caller[2];
+
+  tvalues_flag = 0;
+  if (tvalues_caller) tvalues_flag = 1;
+
+  if (sgroupID) {
+    int sgroup = surf->find_group(sgroupID);
+    if (sgroup < 0) sgroup = surf->add_group(sgroupID);
+    sgroupbit = surf->bitmask[sgroup];
+  } else sgroupbit = 0;
+
+  // allocate per-grid cell data storage
+
+  Grid::ChildCell *cells = grid->cells;
+  Grid::ChildInfo *cinfo = grid->cinfo;
+  Grid::SplitInfo *sinfo = grid->sinfo;
+  nglocal = grid->nlocal;
+
+  // overwrite ncorner with number of edges
+  if(dim == 2) ncorner = 4; // same
+  else ncorner = 12; // different
+
+  grow_percell(0);
+
+  // copy caller values into local values of FixAblate
+
+  for (int icell = 0; icell < nglocal; icell++) {
+    for (int m = 0; m < ncorner; m++)
+      ivalues[icell][m] = ivalues_caller[icell][m];
     if (tvalues_flag) tvalues[icell] = tvalues_caller[icell];
   }
 

@@ -51,6 +51,9 @@ class FixAblate : public Fix {
   void store_corners(int, int, int, double *, double *,
                      double **, int *, double, char *, int);
 
+  void store_intersections(int, int, int, double *, double *,
+                     double **, int *, char *);
+
  protected:
   int me;
   int groupbit,which,argindex,icompute,ifix,ivariable,maxrandom;
@@ -68,6 +71,11 @@ class FixAblate : public Fix {
   double **cvalues;       // corner point values
   int *tvalues;           // per-cell type value
   int tvalues_flag;       // 1 if tvalues is defined (by ReadIsurf)
+
+  // alternative construction from edges
+  int edgetosurf; // flag to use edge
+  double **ivalues;
+
 
   int **ixyz;             // ix,iy,iz indices (1 to Nxyz) of my cells
                           // in 2d/3d ablate grid (iz = 1 for 2d)

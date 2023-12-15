@@ -335,6 +335,15 @@ class Surf : protected Pointers {
   //int *Nintersect;
   double **icvalues;       // reshaped cvalues for implicit surface generation
   int *tvalues;            // vector of per grid cell surf types
+
+  int npairs;
+  std::pair<int,int> *p1p2;
+  double *ivalpairs;
+  int nends;
+  int *cends;
+  int *vends;
+
+
   int aveFlag;             // flag for how corners in unknown cells are set
   int linearFlag;
   double mind;
@@ -408,8 +417,10 @@ class Surf : protected Pointers {
   int get_corner(double, double, double);
   void remove_2d(int);
   void remove_3d(int);
-  double extrapolate(double, double);
-  double minDist(double*, Line*, double*, double*);
+  double param2in(double, double);
+  double param2out(double, double);
+  void subLinear2D(int, int);
+  void linearCorners();
   class MarchingSquares *ms;
   class MarchingCubes *mc;
 };
