@@ -15,7 +15,7 @@ boundary				p p p
 #variable R equal 1.5
 #variable L equal ${R}*2.0
 variable L equal 1.0
-variable N equal 2
+variable N equal 50
 create_box			-${L} ${L} -${L} ${L} -${L} ${L}
 create_grid			${N} ${N} ${N}
 balance_grid		rcb cell
@@ -28,13 +28,14 @@ mixture					air N2 vstream 0.0 0 0
 region					inner block 1.5 7.5 1.5 7.5 INF INF
 group						inner grid region inner one
 
-read_surf       data.box3d invert
+#read_surf       data.box3d invert
+read_surf       data.sphere3d invert
 surf_collide		1 diffuse 300.0 0.0
 surf_modify			all collide 1
 
 fix							fablate ablate all 0 0.2 random 0
-surf_modify     all implicit yes 40.0 fablate inout
-#surf_modify     all implicit yes 40.0 fablate dev
+#surf_modify     all implicit yes 40.0 fablate inout
+surf_modify     all implicit yes 40.0 fablate ave
 
 create_particles    air n 0 twopass
 

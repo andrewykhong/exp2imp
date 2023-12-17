@@ -15,8 +15,8 @@ boundary				p p p
 #variable R equal 1.5
 #variable L equal ${R}*2.0
 variable L equal 1.0
-variable Nx equal 8
-variable Ny equal 8
+variable Nx equal 10
+variable Ny equal 10
 create_box			-${L} ${L} -${L} ${L} -0.5 0.5
 create_grid			${Nx} ${Ny} 1 
 balance_grid		rcb cell
@@ -29,9 +29,9 @@ mixture					air N2 vstream 0.0 0 0
 region					inner block 1.5 7.5 1.5 7.5 INF INF
 group						inner grid region inner one
 
-read_surf       data.square2d invert
+#read_surf       data.square2d invert
 #read_surf       data.diamond2d invert
-#read_surf       data.circle2d invert
+read_surf       data.circle2d invert
 #read_surf       data.circlefine2d invert
 #read_surf       data.unevendiamond2d invert
 #read_surf       data.hour2d invert
@@ -42,12 +42,6 @@ fix							fablate ablate all 0 0.2 random 0
 #surf_modify     all implicit yes 40.0 fablate inout
 surf_modify     all implicit yes 40.0 fablate ave
 #surf_modify     all implicit yes 40.0 fablate linear
-
-#global					surfs implicit
-#read_isurf			inner 7 7 1 binary.8x8 180.5 fablate
-#read_isurf			all ${N} ${N} 1 data.circle 180.5 fablate
-#read_surf       data.square group 1 scale ${R} ${R} 1.0
-
 
 #adapt_grid      all refine nsurf all 2 iterate 5
 
