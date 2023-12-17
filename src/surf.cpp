@@ -4546,11 +4546,6 @@ void Surf::set_surfcell2d()
     for(int jc = 0; jc < ncorner; jc++) ivalues[ic][jc] = -1.0;
   }
 
-  //for(int i = 0; i < Nxyz; i++)
-  //  printf("c: %i; ivalue: %4.3e,%4.3e,%4.3e,%4.3e\n",
-  //    i, ivalues[i][0], ivalues[i][1], ivalues[i][2], ivalues[i][3]);
-  //error->one(FLERR,"check");
-
   double param; // point of intersection as fraction along p1->p2
   int side; // hit inside or outside
   int onsurf; // handles surfaces very close to cell boundary
@@ -4616,16 +4611,6 @@ void Surf::set_surfcell2d()
         // always start with lower corner
         // side will always be either 0 or 1
         hitflag = corner_hit2d(pi, pj, line, param, side, onsurf);
-        //if(c1==20 && icell == 10) {
-          //printf("pi: %4.3e, %4.3e, %4.3e\n", pi[0], pi[1], pi[2]);
-          //printf("pj: %4.3e, %4.3e, %4.3e\n", pj[0], pj[1], pj[2]);
-          //printf("line->p1: %4.3e, %4.3e, %4.3e\n",
-          //  line->p1[0], line->p1[1], line->p1[2]);
-          //printf("line->p2: %4.3e, %4.3e, %4.3e\n",
-          //  line->p2[0], line->p2[1], line->p2[2]);
-          //printf("hit: %i\n", hitflag);
-          //error->one(FLERR,"check");
-        //}
 
         // need to take care of values near machine precision
         if(param < EPSSURF*mind) param = 0.0;
@@ -4647,43 +4632,38 @@ void Surf::set_surfcell2d()
             n1 = 2;
             n2 = 3;
           }
-          if(ivalues[c1][n1] > param || ivalues[c1][n1] < 0) ivalues[c1][n1] = param;
-          if(ivalues[c2][n2] > (1.0-param) || ivalues[c1][n2] < 0) ivalues[c2][n2] = 1.0-param;
 
+          if(ivalues[c1][n1] > param || ivalues[c1][n1] < 0) ivalues[c1][n1] = param;
+          if(ivalues[c2][n2] > (1.0-param) || ivalues[c2][n2] < 0) ivalues[c2][n2] = 1.0-param;
 
           if(mvalues[c1] < 0 || param <= mvalues[c1]) {
-            if(param > 0) svalues[c1] = side;
-            // surface is at corner. must be set outside to avoid small volume errors
-            else {
-              svalues[c1] = 0;
-            }
+            if(param == 0) svalues[c1] = 0;
+            else if(svalues[c1] == 2) 0; // do nothing
+            // conflicting sides from two surfaces meeting at corner
+            else if(std::abs(mvalues[c1]-param) < EPSSURF && svalues[c1] != side) svalues[c1] = 2;
+            else svalues[c1] = side;
 
-            /*if(side == 2) {
-              if(svalues[c2] == 1 && side == 0) svalues[c1] = 0;
-              else if(svalues[c2] == 0 && side == 1) svalues[c1] = 1;
-              else svalues[c1] = 2;
-            } else svalues[c1] = side;*/
+            //if(param > 0) svalues[c1] = side;
+            // surface is at corner. must be set outside to avoid small volume errors
+            //else svalues[c1] = 0;
 
             mvalues[c1] = param;
           }
 
           if(mvalues[c2] < 0 || (1.0-param) <= mvalues[c2]) {
-            if((1.0-param) > 0) svalues[c2] = !side;
-            // surface is at corner. must be set outside to avoid small volume errors
-            else {
-              svalues[c2] = 0;
-            }
+            if((1.0-param) == 0) svalues[c2] = 0;
+            else if(svalues[c2] == 2) 0; // do nothing
+            else if(std::abs(mvalues[c2]-(1.0-param)) < EPSSURF && svalues[c2] != !side) svalues[c2] = 2;
+            else svalues[c2] = !side;
 
-            /*if(side == 2) {
-              if(svalues[c1] == 1 && side == 1) svalues[c2] = 0;
-              else if(svalues[c1] == 0 && side == 0) svalues[c2] = 1;
-              else svalues[c2] = 2;
-            } else svalues[c2] = !side;*/
+            //if((1.0-param) > 0) svalues[c2] = !side;
+            // surface is at corner. must be set outside to avoid small volume errors
+            //else svalues[c2] = 0;
 
             mvalues[c2] = 1.0-param;
           }
 
-          /*if(c1 == 58 || c2 == 58) {
+          /*if(c1 == 71 || c2 == 71) {
             printf("c1: %i; c2: %i\n", c1, c2);
             printf("p1: %4.3e, %4.3e, %4.3e\n", pi[0],pi[1],pi[2]);
             printf("p2: %4.3e, %4.3e, %4.3e\n", pj[0],pj[1],pj[2]);
@@ -4708,7 +4688,8 @@ void Surf::set_surfcell2d()
   //    if(ivalues[i][j]>=0) printf("c: %i; ivalues[%i]: %4.3e\n", i, j, ivalues[i][j]);
 
   //for(int i = 0; i < Nxyz; i++)
-  //  printf("c: %i; svalue: %i\n", i, svalues[i]);
+    //printf("c: %i; svalue: %i; ivalue: %4.3e,%4.3e,%4.3e,%4.3e\n",
+    //  i, svalues[i], ivalues[i][0], ivalues[i][1], ivalues[i][2], ivalues[i][3]);
   //error->one(FLERR,"check");
 
   // now set in/out dependent on cell type
@@ -4788,11 +4769,12 @@ void Surf::set_surfcell2d()
     error->one(FLERR,"cannot find reference");
   }
 
-  //for(int i = 0; i < Nxyz; i++) {
-    //printf("c: %i; svalue: %i\n", i, svalues[i]);
+  for(int i = 0; i < Nxyz; i++) {
+    //if(svalues[i] > 0)
+    printf("c: %i; svalue: %i\n", i, svalues[i]);
     //printf("c: %i; ivalue: %4.3e,%4.3e,%4.3e,%4.3e\n",
     //  i, ivalues[i][0], ivalues[i][1], ivalues[i][2], ivalues[i][3]);
-  //}
+  }
   //error->one(FLERR,"check");
 
   // initially set inside as cin and outside as cout
@@ -4824,7 +4806,7 @@ void Surf::set_surfcell2d()
 
   // find cvalues by solving linear systems
   } else if(linearFlag) {
-    memory->create(cends,Nxyz,"surf:cends");
+    /*memory->create(cends,Nxyz,"surf:cends");
     nends = 0;
     for(int i = 0; i < Nxyz; i++) {
       int nnode = 0;
@@ -4848,7 +4830,7 @@ void Surf::set_surfcell2d()
 
       // need to scale data so that it lies between 0 and 255
 
-    }
+    }*/
 
 
     error->one(FLERR,"testing");
@@ -4859,8 +4841,8 @@ void Surf::set_surfcell2d()
     }// end "for" for grid cells
   }
 
-  for(int i = 0; i < Nxyz; i++)
-    printf("c: %i; cvalue: %4.3e\n", i, cvalues[i]);
+  //for(int i = 0; i < Nxyz; i++)
+  //  printf("c: %i; cvalue: %4.3e\n", i, cvalues[i]);
 
   // free up memory
   memory->destroy(ivalues);
@@ -4907,13 +4889,27 @@ int Surf::corner_hit2d(double *p1, double *p2,
   double p1p[3];
   double p2p[3];
 
+  double dx[8], dy[8];
   double dp = mind/1000.0;
+  dx[0] = dx[1] = dx[6] = dp;
+  dx[2] = dx[5] = 0;
+  dx[3] = dx[4] = dx[7] = -dp;
+
+  dy[0] = dy[2] = dy[7] = dp;
+  dy[1] = dy[4] = 0;
+  dy[3] = dy[5] = dy[6] = -dp;
 
   for(int i = 0; i < 8; i++) {
     p1p[2] = p1[2];
     p2p[2] = p2[2];
 
-    if(i==0) {
+    p1p[0] = p1[0] + dx[i];
+    p1p[1] = p1[1] + dy[i];
+
+    p2p[0] = p2[0] + dx[i];
+    p2p[1] = p2[1] + dy[i];
+
+    /*if(i==0) {
       p1p[0] = p1[0] + dp;
       p1p[1] = p1[1] + dp;
 
@@ -4961,7 +4957,7 @@ int Surf::corner_hit2d(double *p1, double *p2,
 
       p2p[0] = p2[0];
       p2p[1] = p2[1] - dp;
-    }
+    }*/
 
     h = Geometry::
       line_line_intersect(p1p,p2p,line->p1,line->p2,line->norm,d3dum,tparam,tside);
@@ -4981,51 +4977,6 @@ int Surf::corner_hit2d(double *p1, double *p2,
       }
     }
   }
-
-  // try displacing with line normal
-  // consistent for two surfaces hitting corner
-  /*for(int i = 0; i < 3; i++) {
-    p1p[2] = p1[2];
-    p2p[2] = p2[2];
-
-    if(i==0) {
-      p1p[0] = p1[0] + dp*line->norm[0];
-      p1p[1] = p1[1] + dp*line->norm[1];
-
-      p2p[0] = p2[0] + dp*line->norm[0];
-      p2p[1] = p2[1] + dp*line->norm[1];
-    } else if(i==1) {
-      p1p[0] = p1[0];
-      p1p[1] = p1[1] + dp*line->norm[1];
-
-      p2p[0] = p2[0];
-      p2p[1] = p2[1] + dp*line->norm[1];
-    } else {
-      p1p[0] = p1[0] + dp*line->norm[0];
-      p1p[1] = p1[1];
-
-      p2p[0] = p2[0] + dp*line->norm[0];
-      p2p[1] = p2[1];
-    }
-
-    h = Geometry::
-      line_line_intersect(p1p,p2p,line->p1,line->p2,line->norm,d3dum,tparam,tside);
-    if(h) {
-      if(tside == 1 || tside == 2 || tside == 5) {
-        //side = 2;
-        side = 1;
-        if(tparam<0.5) param = 0.0;
-        else param = 1.0;
-        return true;
-      } else {
-        //side = 2;
-        side = 0;
-        if(tparam<0.5) param = 0.0;
-        else param = 1.0;
-        return true;
-      }
-    }
-  }*/
 
   // true miss
   return false;
@@ -5067,151 +5018,6 @@ double Surf::param2out(double param, double v0)
   //v1 = MAX(v1,thresh);
   v1 = MIN(v1,255.0);
   return v1;
-}
-
-/* ----------------------------------------------------------------------
-   Creates groups using branching approach
-------------------------------------------------------------------------- */
-void Surf::subLinear2D(int i, int prev)
-{
-  int next;
-  double n;
-
-  int totaln = 0;
-
-  n = ivalues[i][0];
-  if(n >= 0) {
-    totaln++;
-    if(prev != 0) {
-      next = i - 1;
-      // add to list
-      ivalpairs[npairs] = n;
-      p1p2[npairs++] = std::make_pair(i,next);
-      // recall with next 
-      subLinear2D(next,1);
-    }
-  }
-
-  n = ivalues[i][1];
-  if(n >= 0) {
-    totaln++;
-    if(prev != 1) {
-      next = i + 1;
-      // add to list
-      ivalpairs[npairs] = n;
-      p1p2[npairs++] = std::make_pair(i,next);
-      // recall with next 
-      subLinear2D(next,0);
-    }
-  }
-
-  n = ivalues[i][2];
-  if(n >= 0) {
-    totaln++;
-    if(prev != 2) {
-      next = i - (nxyz[0]+1);
-      // add to list
-      ivalpairs[npairs] = n;
-      p1p2[npairs++] = std::make_pair(i,next);
-      // recall with next 
-      subLinear2D(next,3);
-    }
-  }
-
-  n = ivalues[i][3];
-  if(n >= 0) {
-    totaln++;
-    if(prev != 3) {
-      next = i + (nxyz[0]+1);
-      // add to list
-      ivalpairs[npairs] = n;
-      p1p2[npairs++] = std::make_pair(i,next);
-      // recall with next 
-      subLinear2D(next,2);
-    }
-  }
-
-  // this point is an endpoint, remove from cends to not double counts
-  if (totaln == 1) {
-    //printf("endpoint: %i\n", i);
-    for(int j = 0; j < nends; j++) {
-      // swap last with current index
-      if(cends[j] == i) {
-        int temp = cends[nends-1];
-        cends[nends-1]=cends[j];
-        cends[j] = temp;
-        nends--;
-        break;
-      }
-    }
-  }
-
-  return;
-}
-
-/* ----------------------------------------------------------------------
-   Finds corners using snake method
-------------------------------------------------------------------------- */
-void Surf::linearCorners()
-{
-  int p1, p2;
-  double param;
-  double vin, vout;
-
-  double cmax = thresh;
-  double cmin = thresh;
-  for(int i = 0; i < npairs; i++) {
-    p1 = p1p2[i].first;
-    p2 = p1p2[i].second;
-
-    // param is distance of surface from p1
-    param = ivalpairs[i];
-
-    // if i = 0, p1 is an endpoint and its value needs to be guessed
-    // since values will be scaled later, can be any value
-    if(svalues[p1]==0) {
-      if(i==0) cvalues[p1] = thresh - 1;
-      cvalues[p2] = param2in(param, cvalues[p1]);
-    } else {
-      if(i==0) cvalues[p1] = thresh + 1;
-      cvalues[p2] = param2out(param, cvalues[p1]);
-    }
-
-    cmax = MAX(cvalues[p1],cmax);
-    cmax = MAX(cvalues[p2],cmax);
-
-    cmin = MIN(cvalues[p1],cmin);
-    cmin = MIN(cvalues[p2],cmin);
-  }
-
-  if(cmax <= cin && cmin >= 0.0) return;
-  printf("cmin: %3.1e; cmax: %3.1e\n" ,cmin, cmax);
-  error->one(FLERR,"needs to be scaled");
-
-  double dcmax = cout/cmax;
-  double dcmin = (thresh-cmin)/(thresh-cout);
-
-  double cscale;
-  if(dcmax > dcmin) {
-    cscale = cout/cmax;
-  } else {
-
-  }
-
-  //double dcmin = thresh-cmin;
-  //double dcmax = cmax-thresh;
-
-  // TODO: Need to find center s.t. largeset value smaller than thresh is 
-  // .. still below thresh. Shrink range such that biggest value is below
-  // .. 255 and smallest value is greater than 0
-
-  // scale values such that min = cout and max = cin
-  //double tempc[Nxyz];
-
-  //printf("cmin: %4.3e; cmax: %4.3e; cth: %4.3e\n", cmin, cmax, cthmax);
-  //printf("dcmin: %4.3e; dcmax: %4.3e\n", dcmin, dcmax);
-
-  return;
 }
 
 /* ----------------------------------------------------------------------
@@ -6343,5 +6149,150 @@ void Surf::remove_3d(int groupbit)
 	}// end "for" for grid cells
 
 	return;
+}*/
+
+/* ----------------------------------------------------------------------
+   Creates groups using branching approach
+------------------------------------------------------------------------- */
+/*void Surf::subLinear2D(int i, int prev)
+{
+  int next;
+  double n;
+
+  int totaln = 0;
+
+  n = ivalues[i][0];
+  if(n >= 0) {
+    totaln++;
+    if(prev != 0) {
+      next = i - 1;
+      // add to list
+      ivalpairs[npairs] = n;
+      p1p2[npairs++] = std::make_pair(i,next);
+      // recall with next 
+      subLinear2D(next,1);
+    }
+  }
+
+  n = ivalues[i][1];
+  if(n >= 0) {
+    totaln++;
+    if(prev != 1) {
+      next = i + 1;
+      // add to list
+      ivalpairs[npairs] = n;
+      p1p2[npairs++] = std::make_pair(i,next);
+      // recall with next 
+      subLinear2D(next,0);
+    }
+  }
+
+  n = ivalues[i][2];
+  if(n >= 0) {
+    totaln++;
+    if(prev != 2) {
+      next = i - (nxyz[0]+1);
+      // add to list
+      ivalpairs[npairs] = n;
+      p1p2[npairs++] = std::make_pair(i,next);
+      // recall with next 
+      subLinear2D(next,3);
+    }
+  }
+
+  n = ivalues[i][3];
+  if(n >= 0) {
+    totaln++;
+    if(prev != 3) {
+      next = i + (nxyz[0]+1);
+      // add to list
+      ivalpairs[npairs] = n;
+      p1p2[npairs++] = std::make_pair(i,next);
+      // recall with next 
+      subLinear2D(next,2);
+    }
+  }
+
+  // this point is an endpoint, remove from cends to not double counts
+  if (totaln == 1) {
+    //printf("endpoint: %i\n", i);
+    for(int j = 0; j < nends; j++) {
+      // swap last with current index
+      if(cends[j] == i) {
+        int temp = cends[nends-1];
+        cends[nends-1]=cends[j];
+        cends[j] = temp;
+        nends--;
+        break;
+      }
+    }
+  }
+
+  return;
+}*/
+
+/* ----------------------------------------------------------------------
+   Finds corners using snake method
+------------------------------------------------------------------------- */
+/*void Surf::linearCorners()
+{
+  int p1, p2;
+  double param;
+  double vin, vout;
+
+  double cmax = thresh;
+  double cmin = thresh;
+  for(int i = 0; i < npairs; i++) {
+    p1 = p1p2[i].first;
+    p2 = p1p2[i].second;
+
+    // param is distance of surface from p1
+    param = ivalpairs[i];
+
+    // if i = 0, p1 is an endpoint and its value needs to be guessed
+    // since values will be scaled later, can be any value
+    if(svalues[p1]==0) {
+      if(i==0) cvalues[p1] = thresh - 1;
+      cvalues[p2] = param2in(param, cvalues[p1]);
+    } else {
+      if(i==0) cvalues[p1] = thresh + 1;
+      cvalues[p2] = param2out(param, cvalues[p1]);
+    }
+
+    cmax = MAX(cvalues[p1],cmax);
+    cmax = MAX(cvalues[p2],cmax);
+
+    cmin = MIN(cvalues[p1],cmin);
+    cmin = MIN(cvalues[p2],cmin);
+  }
+
+  if(cmax <= cin && cmin >= 0.0) return;
+  printf("cmin: %3.1e; cmax: %3.1e\n" ,cmin, cmax);
+  error->one(FLERR,"needs to be scaled");
+
+  double dcmax = cout/cmax;
+  double dcmin = (thresh-cmin)/(thresh-cout);
+
+  double cscale;
+  if(dcmax > dcmin) {
+    cscale = cout/cmax;
+  } else {
+
+  }
+
+  //double dcmin = thresh-cmin;
+  //double dcmax = cmax-thresh;
+
+  // TODO: Need to find center s.t. largeset value smaller than thresh is 
+  // .. still below thresh. Shrink range such that biggest value is below
+  // .. 255 and smallest value is greater than 0
+
+  // scale values such that min = cout and max = cin
+  //double tempc[Nxyz];
+
+  //printf("cmin: %4.3e; cmax: %4.3e; cth: %4.3e\n", cmin, cmax, cthmax);
+  //printf("dcmin: %4.3e; dcmax: %4.3e\n", dcmin, dcmax);
+
+  return;
 }*/
 
