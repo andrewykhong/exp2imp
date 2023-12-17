@@ -334,6 +334,7 @@ class Surf : protected Pointers {
   //int **intersect;
   //int *Nintersect;
   double **icvalues;       // reshaped cvalues for implicit surface generation
+  double **iivalues;
   int *tvalues;            // vector of per grid cell surf types
 
   int npairs;

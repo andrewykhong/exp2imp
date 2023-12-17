@@ -295,3 +295,306 @@ double MarchingSquares::interpolate(double v0, double v1, double lo, double hi)
   value = MIN(value,hi);
   return value;
 }
+
+/* ----------------------------------------------------------------------
+   same as previous invoke but uses input intersections instead of interpolate
+   (only used in converting an explicit to implicit surface)
+------------------------------------------------------------------------- */
+
+void MarchingSquares::invoke(double **cvalues, int *svalues, double **ivalues)
+{
+  int i,ipt,isurf,nsurf,which,splitflag;
+  double v00,v01,v10,v11;
+  int bit0,bit1,bit2,bit3;
+  double ave;
+  double *lo,*hi;
+  surfint *ptr;
+
+  double pt[4][3];
+  pt[0][2] = pt[1][2] = pt[2][2] = pt[3][2] = 0.0;
+
+  Grid::ChildCell *cells = grid->cells;
+  Grid::ChildInfo *cinfo = grid->cinfo;
+  MyPage<surfint> *csurfs = grid->csurfs;
+  int nglocal = grid->nlocal;
+  int groupbit = grid->bitmask[ggroup];
+
+  for (int icell = 0; icell < nglocal; icell++) {
+    if (!(cinfo[icell].mask & groupbit)) continue;
+    if (cells[icell].nsplit <= 0) continue;
+    lo = cells[icell].lo;
+    hi = cells[icell].hi;
+
+    // cvalues are ordered lower-left, lower-right, upper-left, upper-right
+    // Vyx encodes this as 0/1 in each dim
+
+    // v00->v01 = ivalues[0] (lower-left / lower-right)
+    // v00->v10 = ivalues[3] (lower-left / upper-left)
+    // v01->v11 = ivalues[1] (lower-right / upper-right)
+    // v10->v11 = ivalues[2] (upper-left / upper-right)
+
+    v00 = cvalues[icell][0];
+    v01 = cvalues[icell][1];
+    v10 = cvalues[icell][2];
+    v11 = cvalues[icell][3];
+
+    // make last 2 bits consistent with Wiki page (see NOTE above)
+		// if corner value below thresh, no solid (Set as zero)
+    bit0 = v00 <= thresh ? 0 : 1;
+    bit1 = v01 <= thresh ? 0 : 1;
+    bit2 = v11 <= thresh ? 0 : 1;
+    bit3 = v10 <= thresh ? 0 : 1;
+
+    which = (bit3 << 3) + (bit2 << 2) + (bit1 << 1) + bit0;
+    splitflag = 0;
+
+    switch (which) {
+
+    case 0:
+      nsurf = 0;
+      break;
+
+    case 1:
+      nsurf = 1;
+      pt[0][0] = lo[0];
+      //pt[0][1] = interpolate(v00,v10,lo[1],hi[1]);
+      //pt[1][0] = interpolate(v00,v01,lo[0],hi[0]);
+      pt[1][1] = lo[1];
+
+      pt[0][1] = lo[1] + ivalues[icell][3]*(hi[1]-lo[1]);
+      pt[1][0] = lo[0] + ivalues[icell][0]*(hi[0]-lo[0]);
+      break;
+
+    case 2:
+      nsurf = 1;
+      //pt[0][0] = interpolate(v00,v01,lo[0],hi[0]);
+      pt[0][1] = lo[1];
+      pt[1][0] = hi[0];
+      //pt[1][1] = interpolate(v01,v11,lo[1],hi[1]);
+
+      pt[0][0] = lo[0] + ivalues[icell][0]*(hi[0]-lo[0]);
+      pt[1][1] = lo[1] + ivalues[icell][1]*(hi[1]-lo[1]);
+      break;
+
+    case 3:
+      nsurf = 1;
+      pt[0][0] = lo[0];
+      //pt[0][1] = interpolate(v00,v10,lo[1],hi[1]);
+      pt[1][0] = hi[0];
+      //pt[1][1] = interpolate(v01,v11,lo[1],hi[1]);
+
+      pt[0][1] = lo[1] + ivalues[icell][3]*(hi[1]-lo[1]);
+      pt[1][1] = lo[1] + ivalues[icell][1]*(hi[1]-lo[1]);
+      break;
+
+    case 4:
+      nsurf = 1;
+      pt[0][0] = hi[0];
+      //pt[0][1] = interpolate(v01,v11,lo[1],hi[1]);
+      //pt[1][0] = interpolate(v10,v11,lo[0],hi[0]);
+      pt[1][1] = hi[1];
+
+      pt[0][1] = lo[1] + ivalues[icell][1]*(hi[1]-lo[1]);
+      pt[1][0] = lo[0] + ivalues[icell][2]*(hi[0]-lo[0]);
+      break;
+
+    case 5:
+      nsurf = 2;
+      ave = 0.25 * (v00 + v01 + v10 + v11);
+      if (ave > thresh) {
+        splitflag = 1;
+        pt[0][0] = lo[0];
+        //pt[0][1] = interpolate(v00,v10,lo[1],hi[1]);
+        //pt[1][0] = interpolate(v10,v11,lo[0],hi[0]);
+        pt[1][1] = hi[1];
+
+        pt[0][1] = lo[1] + ivalues[icell][3]*(hi[1]-lo[1]);
+        pt[1][0] = lo[0] + ivalues[icell][2]*(hi[0]-lo[0]);
+
+        pt[2][0] = hi[0];
+        //pt[2][1] = interpolate(v01,v11,lo[1],hi[1]);
+        //pt[3][0] = interpolate(v00,v01,lo[0],hi[0]);
+        pt[3][1] = lo[1];
+
+        pt[2][1] = lo[1] + ivalues[icell][1]*(hi[1]-lo[1]);
+        pt[3][0] = lo[0] + ivalues[icell][0]*(hi[0]-lo[0]);
+      } else {
+        pt[0][0] = lo[0];
+        //pt[0][1] = interpolate(v00,v10,lo[1],hi[1]);
+        //pt[1][0] = interpolate(v00,v01,lo[0],hi[0]);
+        pt[1][1] = lo[1];
+
+        pt[0][1] = lo[1] + ivalues[icell][3]*(hi[1]-lo[1]);
+        pt[1][0] = lo[0] + ivalues[icell][0]*(hi[0]-lo[0]);
+
+        pt[2][0] = hi[0];
+        //pt[2][1] = interpolate(v01,v11,lo[1],hi[1]);
+        //pt[3][0] = interpolate(v10,v11,lo[0],hi[0]);
+        pt[3][1] = hi[1];
+
+        pt[2][1] = lo[1] + ivalues[icell][1]*(hi[1]-lo[1]);
+        pt[3][0] = lo[0] + ivalues[icell][2]*(hi[0]-lo[0]);
+      }
+      break;
+
+    case 6:
+      nsurf = 1;
+      //pt[0][0] = interpolate(v00,v01,lo[0],hi[0]);
+      pt[0][1] = lo[1];
+      //pt[1][0] = interpolate(v10,v11,lo[0],hi[0]);
+      pt[1][1] = hi[1];
+
+      pt[0][0] = lo[0] + ivalues[icell][0]*(hi[0]-lo[0]);
+      pt[1][0] = lo[0] + ivalues[icell][2]*(hi[0]-lo[0]);
+      break;
+
+    case 7:
+      nsurf = 1;
+      pt[0][0] = lo[0];
+      //pt[0][1] = interpolate(v00,v10,lo[1],hi[1]);
+      //pt[1][0] = interpolate(v10,v11,lo[0],hi[0]);
+      pt[1][1] = hi[1];
+
+      pt[0][1] = lo[1] + ivalues[icell][3]*(hi[1]-lo[1]);
+      pt[1][0] = lo[0] + ivalues[icell][2]*(hi[0]-lo[0]);
+      break;
+
+    case 8:
+      nsurf = 1;
+      //pt[0][0] = interpolate(v10,v11,lo[0],hi[0]);
+      pt[0][1] = hi[1];
+      pt[1][0] = lo[0];
+      //pt[1][1] = interpolate(v00,v10,lo[1],hi[1]);
+
+      pt[0][0] = lo[0] + ivalues[icell][2]*(hi[0]-lo[0]);
+      pt[1][1] = lo[1] + ivalues[icell][3]*(hi[1]-lo[1]);
+      break;
+
+    case 9:
+      nsurf = 1;
+      //pt[0][0] = interpolate(v10,v11,lo[0],hi[0]);
+      pt[0][1] = hi[1];
+      //pt[1][0] = interpolate(v00,v01,lo[0],hi[0]);
+      pt[1][1] = lo[1];
+
+      pt[0][0] = lo[0] + ivalues[icell][2]*(hi[0]-lo[0]);
+      pt[1][0] = lo[0] + ivalues[icell][0]*(hi[0]-lo[0]);
+      break;
+
+    case 10:
+      nsurf = 2;
+      ave = 0.25 * (v00 + v01 + v10 + v11);
+      if (ave > thresh) {
+        splitflag = 1;
+        //pt[0][0] = interpolate(v00,v01,lo[0],hi[0]);
+        pt[0][1] = lo[1];
+        pt[1][0] = lo[0];
+        //pt[1][1] = interpolate(v00,v10,lo[1],hi[1]);
+
+        pt[0][0] = lo[0] + ivalues[icell][0]*(hi[0]-lo[0]);
+        pt[1][1] = lo[1] + ivalues[icell][3]*(hi[1]-lo[1]);
+
+        //pt[2][0] = interpolate(v10,v11,lo[0],hi[0]);
+        pt[2][1] = hi[1];
+        pt[3][0] = hi[0];
+        //pt[3][1] = interpolate(v01,v11,lo[1],hi[1]);
+
+        pt[2][0] = lo[0] + ivalues[icell][2]*(hi[0]-lo[0]);
+        pt[3][1] = lo[1] + ivalues[icell][1]*(hi[1]-lo[1]);
+      } else {
+        //pt[0][0] = interpolate(v10,v11,lo[0],hi[0]);
+        pt[0][1] = hi[1];
+        pt[1][0] = lo[0];
+        //pt[1][1] = interpolate(v00,v10,lo[1],hi[1]);
+
+        pt[0][0] = lo[0] + ivalues[icell][2]*(hi[0]-lo[0]);
+        pt[1][1] = lo[1] + ivalues[icell][3]*(hi[1]-lo[1]);
+
+        //pt[2][0] = interpolate(v00,v01,lo[0],hi[0]);
+        pt[2][1] = lo[1];
+        pt[3][0] = hi[0];
+        //pt[3][1] = interpolate(v01,v11,lo[1],hi[1]);
+
+        pt[2][0] = lo[0] + ivalues[icell][0]*(hi[0]-lo[0]);
+        pt[3][1] = lo[1] + ivalues[icell][1]*(hi[1]-lo[1]);
+      }
+      break;
+
+    case 11:
+      nsurf = 1;
+      //pt[0][0] = interpolate(v10,v11,lo[0],hi[0]);
+      pt[0][1] = hi[1];
+      pt[1][0] = hi[0];
+      //pt[1][1] = interpolate(v01,v11,lo[1],hi[1]);
+
+      pt[0][0] = lo[0] + ivalues[icell][2]*(hi[0]-lo[0]);
+      pt[1][1] = lo[1] + ivalues[icell][1]*(hi[1]-lo[1]);
+      break;
+
+    case 12:
+      nsurf = 1;
+      pt[0][0] = hi[0];
+      //pt[0][1] = interpolate(v01,v11,lo[1],hi[1]);
+      pt[1][0] = lo[0];
+      //pt[1][1] = interpolate(v00,v10,lo[1],hi[1]);
+
+      pt[0][1] = lo[1] + ivalues[icell][1]*(hi[1]-lo[1]);
+      pt[1][1] = lo[1] + ivalues[icell][3]*(hi[1]-lo[1]);
+      break;
+
+    case 13:
+      nsurf = 1;
+      pt[0][0] = hi[0];
+      //pt[0][1] = interpolate(v01,v11,lo[1],hi[1]);
+      //pt[1][0] = interpolate(v00,v01,lo[0],hi[0]);
+      pt[1][1] = lo[1];
+
+      pt[0][1] = lo[1] + ivalues[icell][1]*(hi[1]-lo[1]);
+      pt[1][0] = lo[0] + ivalues[icell][0]*(hi[0]-lo[0]);
+      break;
+
+    case 14:
+      nsurf = 1;
+      //pt[0][0] = interpolate(v00,v01,lo[0],hi[0]);
+      pt[0][1] = lo[1];
+      pt[1][0] = lo[0];
+      //pt[1][1] = interpolate(v00,v10,lo[1],hi[1]);
+
+      pt[0][0] = lo[0] + ivalues[icell][0]*(hi[0]-lo[0]);
+      pt[1][1] = lo[1] + ivalues[icell][3]*(hi[1]-lo[1]);
+      break;
+
+    case 15:
+      nsurf = 0;
+      break;
+    }
+
+    // populate Grid and Surf data structs
+    // points will be duplicated, not unique
+    // surf ID = cell ID for all surfs in cell
+
+    ptr = csurfs->get(nsurf);
+
+    /*printf("icell: %i; nsurf: %i\n", icell, nsurf);
+    printf("lo: %4.3e, %4.3e\n", lo[0], lo[1]);
+    printf("hi: %4.3e, %4.3e\n", hi[0], hi[1]);
+    printf("pt0: %4.3e, %4.3e\n", pt[0][0], pt[0][1]);
+    printf("pt1: %4.3e, %4.3e\n", pt[1][0], pt[1][1]);*/
+
+    ipt = 0;
+    for (i = 0; i < nsurf; i++) {
+      if (svalues) surf->add_line(cells[icell].id,svalues[icell],
+                                  pt[ipt],pt[ipt+1]);
+      else surf->add_line(cells[icell].id,1,pt[ipt],pt[ipt+1]);
+      ipt += 2;
+      isurf = surf->nlocal - 1;
+      ptr[i] = isurf;
+    }
+
+    cells[icell].nsurf = nsurf;
+    if (nsurf) {
+      cells[icell].csurfs = ptr;
+      cinfo[icell].type = OVERLAP;
+    }
+  }
+}

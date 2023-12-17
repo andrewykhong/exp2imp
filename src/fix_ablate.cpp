@@ -187,9 +187,8 @@ FixAblate::FixAblate(SPARTA *sparta, int narg, char **arg) :
   storeflag = 0;
   array_grid = cvalues = NULL;
   tvalues = NULL;
-  ncorner = size_per_grid_cols;
-
   ivalues = NULL;
+  ncorner = size_per_grid_cols;
 
   // local storage
 
@@ -244,6 +243,7 @@ FixAblate::~FixAblate()
   delete [] idsource;
   memory->destroy(cvalues);
   memory->destroy(tvalues);
+  memory->destroy(ivalues);
 
   memory->destroy(ixyz);
   memory->destroy(mcflags);
@@ -257,8 +257,6 @@ FixAblate::~FixAblate()
 
   memory->destroy(sbuf);
   memory->destroy(vbuf);
-
-  memory->destroy(ivalues);
 
   delete ms;
   delete mc;
@@ -358,17 +356,15 @@ void FixAblate::store_corners(int nx_caller, int ny_caller, int nz_caller,
   create_surfs(1);
 }
 
-
 /* ----------------------------------------------------------------------
-   store grid edge intersection and type values in ivalues and tvalues
-   then create implicit surfaces
-   called by ReadIsurf when corner point grid is read in
+   same as above but also stores intersections
 ------------------------------------------------------------------------- */
 
-void FixAblate::store_intersections(int nx_caller, int ny_caller, int nz_caller,
+void FixAblate::store_corners(int nx_caller, int ny_caller, int nz_caller,
                               double *cornerlo_caller, double *xyzsize_caller,
-                              double **ivalues_caller, int *tvalues_caller,
-                              char *sgroupID)
+                              double **cvalues_caller, int *tvalues_caller,
+                              double **ivalues_caller,
+                              double thresh_caller, char *sgroupID, int pushflag)
 {
   storeflag = 1;
 
@@ -381,6 +377,7 @@ void FixAblate::store_intersections(int nx_caller, int ny_caller, int nz_caller,
   xyzsize[0] = xyzsize_caller[0];
   xyzsize[1] = xyzsize_caller[1];
   xyzsize[2] = xyzsize_caller[2];
+  thresh = thresh_caller;
 
   tvalues_flag = 0;
   if (tvalues_caller) tvalues_flag = 1;
@@ -398,17 +395,16 @@ void FixAblate::store_intersections(int nx_caller, int ny_caller, int nz_caller,
   Grid::SplitInfo *sinfo = grid->sinfo;
   nglocal = grid->nlocal;
 
-  // overwrite ncorner with number of edges
-  if(dim == 2) ncorner = 4; // same
-  else ncorner = 12; // different
-
   grow_percell(0);
 
   // copy caller values into local values of FixAblate
-
+  if(dim==2) memory->create(ivalues,nglocal,4,"ablate::ivalues");
+  else memory->create(ivalues,nglocal,12,"ablate::ivalues");
   for (int icell = 0; icell < nglocal; icell++) {
     for (int m = 0; m < ncorner; m++)
-      ivalues[icell][m] = ivalues_caller[icell][m];
+      cvalues[icell][m] = cvalues_caller[icell][m];
+    ivalues[icell][0] = ivalues_caller[icell][0];
+    ivalues[icell][1] = ivalues_caller[icell][1];
     if (tvalues_flag) tvalues[icell] = tvalues_caller[icell];
   }
 
@@ -442,7 +438,8 @@ void FixAblate::store_intersections(int nx_caller, int ny_caller, int nz_caller,
 
   // create implicit surfaces
 
-  create_surfs(1);
+  create_surfs(1,1);
+  error->one(FLERR,"check");
 }
 
 /* ---------------------------------------------------------------------- */
@@ -497,7 +494,7 @@ void FixAblate::end_of_step()
 
 /* ---------------------------------------------------------------------- */
 
-void FixAblate::create_surfs(int outflag)
+void FixAblate::create_surfs(int outflag, int usei)
 {
   // DEBUG
   // store copy of last ablation's per-cell MC flags before a new ablation
@@ -531,8 +528,13 @@ void FixAblate::create_surfs(int outflag)
   // cvalues = corner point values
   // tvalues = surf type for surfs in each grid cell
 
-  if (dim == 2) ms->invoke(cvalues,tvalues);
-  else mc->invoke(cvalues,tvalues,mcflags);
+  if(usei) {
+    if (dim == 2) ms->invoke(cvalues,tvalues,ivalues);
+    //else mc->invoke(cvalues,tvalues,ivalues,mcflags);
+  } else {
+    if (dim == 2) ms->invoke(cvalues,tvalues);
+    else mc->invoke(cvalues,tvalues,mcflags);
+  }
 
   // set surf->nsurf and surf->nown
 
@@ -1387,6 +1389,9 @@ int FixAblate::pack_grid_one(int icell, char *buf, int memflag)
     ptr += sizeof(double);
   }
 
+  if (memflag) memcpy(ptr,ivalues[icell],2*sizeof(double));
+  ptr += 2*sizeof(double);
+
   if (memflag) {
     double *dbuf = (double *) ptr;
     dbuf[0] = ixyz[icell][0];
@@ -1441,6 +1446,9 @@ int FixAblate::unpack_grid_one(int icell, char *buf)
     ptr += sizeof(double);
   }
 
+  //memcpy(ivalues[icell],ptr,2*sizeof(double));
+  //ptr += 2*sizeof(double);
+
   double *dbuf = (double *) ptr;
   ixyz[icell][0] = static_cast<int> (dbuf[0]);
   ixyz[icell][1] = static_cast<int> (dbuf[1]);
@@ -1481,6 +1489,8 @@ void FixAblate::copy_grid_one(int icell, int jcell)
 {
   memcpy(cvalues[jcell],cvalues[icell],ncorner*sizeof(double));
   if (tvalues_flag) tvalues[jcell] = tvalues[icell];
+  //ivalues[jcell][0] = ivalues[icell][0];
+  //ivalues[jcell][1] = ivalues[icell][1];
 
   ixyz[jcell][0] = ixyz[icell][0];
   ixyz[jcell][1] = ixyz[icell][1];
@@ -1504,6 +1514,8 @@ void FixAblate::add_grid_one()
 
   for (int i = 0; i < ncorner; i++) cvalues[nglocal][i] = 0.0;
   if (tvalues_flag) tvalues[nglocal] = 0;
+  //ivalues[nglocal][0] = 0.0;
+  //ivalues[nglocal][1] = 0.0;
   ixyz[nglocal][0] = 0;
   ixyz[nglocal][1] = 0;
   ixyz[nglocal][2] = 0;
@@ -1536,6 +1548,7 @@ void FixAblate::grow_percell(int nnew)
   else maxgrid += DELTAGRID;
   memory->grow(cvalues,maxgrid,ncorner,"ablate:cvalues");
   if (tvalues_flag) memory->grow(tvalues,maxgrid,"ablate:tvalues");
+  //memory->grow(ivalues,maxgrid,2,"ablate:ivalues");
   memory->grow(ixyz,maxgrid,3,"ablate:ixyz");
   memory->grow(mcflags,maxgrid,4,"ablate:mcflags");
   memory->grow(celldelta,maxgrid,"ablate:celldelta");

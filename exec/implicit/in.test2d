@@ -29,18 +29,18 @@ mixture					air N2 vstream 0.0 0 0
 region					inner block 1.5 7.5 1.5 7.5 INF INF
 group						inner grid region inner one
 
-#read_surf       data.square2d invert
+read_surf       data.square2d invert
 #read_surf       data.diamond2d invert
 #read_surf       data.circle2d invert
 #read_surf       data.circlefine2d invert
 #read_surf       data.unevendiamond2d invert
-read_surf       data.arrow2d invert
+#read_surf       data.arrow2d invert
 surf_collide		1 diffuse 300.0 0.0
 surf_modify			all collide 1
 
 fix							fablate ablate all 0 0.2 random 0
-#surf_modify     all implicit yes 40.0 fablate inout
-surf_modify     all implicit yes 40.0 fablate dev
+surf_modify     all implicit yes 40.0 fablate inout
+#surf_modify     all implicit yes 40.0 fablate ave
 
 #global					surfs implicit
 #read_isurf			inner 7 7 1 binary.8x8 180.5 fablate

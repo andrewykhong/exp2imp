@@ -51,8 +51,9 @@ class FixAblate : public Fix {
   void store_corners(int, int, int, double *, double *,
                      double **, int *, double, char *, int);
 
-  void store_intersections(int, int, int, double *, double *,
-                     double **, int *, char *);
+  // also stores intersctions
+  void store_corners(int, int, int, double *, double *,
+                     double **, int *, double **, double, char *, int);
 
  protected:
   int me;
@@ -70,11 +71,11 @@ class FixAblate : public Fix {
 
   double **cvalues;       // corner point values
   int *tvalues;           // per-cell type value
+  double **ivalues;       // intersection values
   int tvalues_flag;       // 1 if tvalues is defined (by ReadIsurf)
 
   // alternative construction from edges
   int edgetosurf; // flag to use edge
-  double **ivalues;
 
 
   int **ixyz;             // ix,iy,iz indices (1 to Nxyz) of my cells
@@ -103,7 +104,7 @@ class FixAblate : public Fix {
   class MarchingCubes *mc;
   class RanKnuth *random;
 
-  void create_surfs(int);
+  void create_surfs(int, int usei=0);
   void set_delta_random();
   void set_delta();
   void decrement();
