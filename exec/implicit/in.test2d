@@ -34,13 +34,14 @@ read_surf       data.square2d invert
 #read_surf       data.circle2d invert
 #read_surf       data.circlefine2d invert
 #read_surf       data.unevendiamond2d invert
-#read_surf       data.arrow2d invert
+#read_surf       data.hour2d invert
 surf_collide		1 diffuse 300.0 0.0
 surf_modify			all collide 1
 
 fix							fablate ablate all 0 0.2 random 0
-surf_modify     all implicit yes 40.0 fablate inout
-#surf_modify     all implicit yes 40.0 fablate ave
+#surf_modify     all implicit yes 40.0 fablate inout
+surf_modify     all implicit yes 40.0 fablate ave
+#surf_modify     all implicit yes 40.0 fablate linear
 
 #global					surfs implicit
 #read_isurf			inner 7 7 1 binary.8x8 180.5 fablate
@@ -59,10 +60,8 @@ timestep				0.001
 dump 1 image all 100 dump.* type type gline yes 0.005 surf one 0.01 particle yes pdiam 0.02
 dump_modify 1 glinecolor blue
 
-#dump 1 image all 100 dump.* type type gline yes 0.005 surf one 0.05 particle no
+#dump 1 image all 100 dump.* type type surf one 0.005 particle yes pdiam 0.02
 #dump_modify 1 glinecolor blue
-
-#dump 1 image all 100 dump.* type type surf one 0.02 particle yes pdiam 0.02
 
 stats						5
 stats_style			step cpu np nattempt ncoll nscoll nscheck

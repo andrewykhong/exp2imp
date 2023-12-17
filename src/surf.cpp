@@ -335,7 +335,6 @@ void Surf::modify_params(int narg, char **arg)
         //printf("remove_2/3d\n");
         if (domain->dimension == 2) {
           remove_2d(groupbit);
-          //printf("watertight?\n");
           check_watertight_2d();
           if (nsurf == 0) exist = 0 ;
         } else {
@@ -394,12 +393,11 @@ void Surf::modify_params(int narg, char **arg)
         cpushflag = 0; // do later
         char *sgroupID = NULL; // do later
 
-        // temporarily set all corners to 0, should have no surfaces
-        //ablate->store_corners(nxyz[0],nxyz[1],nxyz[2],corner,xyzsize,
-        //                icvalues,tvalues,thresh,sgroupID,cpushflag);
-
         ablate->store_corners(nxyz[0],nxyz[1],nxyz[2],corner,xyzsize,
-                        icvalues,tvalues,iivalues,thresh,sgroupID,cpushflag);
+                        icvalues,tvalues,thresh,sgroupID,cpushflag);
+
+        //ablate->store_corners(nxyz[0],nxyz[1],nxyz[2],corner,xyzsize,
+        //                icvalues,tvalues,iivalues,thresh,sgroupID,cpushflag);
 
         if (ablate->nevery == 0) modify->delete_fix(ablateID);
         MPI_Barrier(world);
@@ -4469,7 +4467,10 @@ void Surf::set_corners()
 
 
 	// store interseciots into iivalues
-  int c0,c1,c2,c3,c4,c5,c6,c7;
+  // still unclear how to ablate
+  // how to account for two intersections meeting on one cell edge
+  // .. maybe just delete?
+  /*int c0,c1,c2,c3,c4,c5,c6,c7;
 	for(int icell = 0; icell < grid->nlocal; icell++) {
 
     lc[0] = cells[icell].lo[0];
@@ -4502,12 +4503,8 @@ void Surf::set_corners()
     if(domain->dimension==3) {
 
     }
+  }*/
 
-    /*printf("icell: %i; ival: %2.1e,%2.1e,%2.1e,%2.1e\n",
-            icell,
-            iivalues[icell][0], iivalues[icell][1],
-            iivalues[icell][2], iivalues[icell][3]);*/
-  }
   //error->one(FLERR,"check");
 	return;
 }
@@ -4541,12 +4538,12 @@ void Surf::set_surfcell2d()
   // each corner has 4 neighbors
   // -x, +x, -y, +y
   // only recrod neighbor to right and top
-  memory->create(ivalues,Nxyz,2,"surf:ivalues");
+  memory->create(ivalues,Nxyz,ncorner,"surf:ivalues");
 	
   for(int ic = 0; ic < Nxyz; ic++) {
     svalues[ic] = -1;
     mvalues[ic] = -1.0;
-    for(int jc = 0; jc < 2; jc++) ivalues[ic][jc] = -1.0;
+    for(int jc = 0; jc < ncorner; jc++) ivalues[ic][jc] = -1.0;
   }
 
   //for(int i = 0; i < Nxyz; i++)
@@ -4562,11 +4559,12 @@ void Surf::set_surfcell2d()
   int ci[4], cj[4];
   ci[0] = 0; cj[0] = 1;
   ci[1] = 1; cj[1] = 3;
-  ci[2] = 2; cj[2] = 3;
-  ci[3] = 0; cj[3] = 2;
+  ci[2] = 3; cj[2] = 2;
+  ci[3] = 2; cj[3] = 0;
 
   // first determine the intersection values/count for each corner
   int xyzcell, xyzp1, xyzp2;
+  int n1, n2;
 	for(int icell = 0; icell < grid->nlocal; icell++) {
 
     // if no surfs, continue
@@ -4609,7 +4607,6 @@ void Surf::set_surfcell2d()
       // c1 is always lower from above
       int c1 = get_corner(pi[0], pi[1], pi[2]);
       int c2 = get_corner(pj[0], pj[1], pj[2]);
-      if(c1>c2) error->one(FLERR,"c1 greater than c2");
 
       // test all surfs+corners to see if any hit
       for (int m = 0; m < nsurf; m++) {
@@ -4637,38 +4634,69 @@ void Surf::set_surfcell2d()
         // once a hit is found
         if(hitflag) {
 
-          // only need to record for lower corner
-          if(ic==0 || ic==2) ivalues[c1][0] = param;
-          else ivalues[c1][1] = param;
+          if(ic==0) {
+            n1 = 1;
+            n2 = 0;
+          } else if(ic==1) {
+            n1 = 3;
+            n2 = 2;
+          } else if(ic==2) {
+            n1 = 0;
+            n2 = 1;
+          } else {
+            n1 = 2;
+            n2 = 3;
+          }
+          if(ivalues[c1][n1] > param || ivalues[c1][n1] < 0) ivalues[c1][n1] = param;
+          if(ivalues[c2][n2] > (1.0-param) || ivalues[c1][n2] < 0) ivalues[c2][n2] = 1.0-param;
 
-          // determine side
-          if(mvalues[c1] == -1 || param < mvalues[c1]) {
-            svalues[c1] = side;
-            mvalues[c1] = param;
-          // two surfaces equidistant from corner
-          } else if ( std::abs(param - mvalues[c1]) < EPSSURF && svalues[c1] != side) {
-            svalues[c1] = 3;
+
+          if(mvalues[c1] < 0 || param <= mvalues[c1]) {
+            if(param > 0) svalues[c1] = side;
+            // surface is at corner. must be set outside to avoid small volume errors
+            else {
+              svalues[c1] = 0;
+            }
+
+            /*if(side == 2) {
+              if(svalues[c2] == 1 && side == 0) svalues[c1] = 0;
+              else if(svalues[c2] == 0 && side == 1) svalues[c1] = 1;
+              else svalues[c1] = 2;
+            } else svalues[c1] = side;*/
+
             mvalues[c1] = param;
           }
 
-          if(mvalues[c2] == -1 || (1.0-param) < mvalues[c2]) {
-            svalues[c2] = !side;
-            mvalues[c2] = 1.0-param;
-          } else if ( std::abs((1.0-param) - mvalues[c2]) < EPSSURF && svalues[c2] != !side) {
-            svalues[c2] = 3;
+          if(mvalues[c2] < 0 || (1.0-param) <= mvalues[c2]) {
+            if((1.0-param) > 0) svalues[c2] = !side;
+            // surface is at corner. must be set outside to avoid small volume errors
+            else {
+              svalues[c2] = 0;
+            }
+
+            /*if(side == 2) {
+              if(svalues[c1] == 1 && side == 1) svalues[c2] = 0;
+              else if(svalues[c1] == 0 && side == 0) svalues[c2] = 1;
+              else svalues[c2] = 2;
+            } else svalues[c2] = !side;*/
+
             mvalues[c2] = 1.0-param;
           }
 
-          /*if(c1 == 124 || c2 == 124) {
+          /*if(c1 == 58 || c2 == 58) {
             printf("c1: %i; c2: %i\n", c1, c2);
             printf("p1: %4.3e, %4.3e, %4.3e\n", pi[0],pi[1],pi[2]);
             printf("p2: %4.3e, %4.3e, %4.3e\n", pj[0],pj[1],pj[2]);
             printf("line->p1: %4.3e, %4.3e, %4.3e\n", line->p1[0],line->p1[1],line->p1[2]);
             printf("line->p2: %4.3e, %4.3e, %4.3e\n", line->p2[0],line->p2[1],line->p2[2]);
             printf("svalues - c1: %i; c2: %i\n", svalues[c1], svalues[c2]);
+            printf("c: %i; ivalue: %4.3e,%4.3e,%4.3e,%4.3e\n",
+                  c1, ivalues[c1][0], ivalues[c1][1], ivalues[c1][2], ivalues[c1][3]);
+            printf("c: %i; ivalue: %4.3e,%4.3e,%4.3e,%4.3e\n",
+                  c2, ivalues[c2][0], ivalues[c2][1], ivalues[c2][2], ivalues[c2][3]);
             printf("param: %4.3e; side: %i\n\n", param, side);
           }*/
-        // if on surf, only set corner closest to surface
+
         } // end "if" hitflag
       }// end "for" for surfaces
 		}// end "for" for corners in cellfe
@@ -4729,6 +4757,7 @@ void Surf::set_surfcell2d()
   int j; // test neighbor
   for(int i = 0; i < Nxyz; i++) {
     if(svalues[i] == 0 || svalues[i] == 1) continue;
+    //printf("i: %i\n", i);
 
     // try x-neighbor
     j = i - 1;
@@ -4759,59 +4788,285 @@ void Surf::set_surfcell2d()
     error->one(FLERR,"cannot find reference");
   }
 
-  //for(int i = 0; i < Nxyz; i++)
+  //for(int i = 0; i < Nxyz; i++) {
     //printf("c: %i; svalue: %i\n", i, svalues[i]);
     //printf("c: %i; ivalue: %4.3e,%4.3e,%4.3e,%4.3e\n",
-      //i, ivalues[i][0], ivalues[i][1], ivalues[i][2], ivalues[i][3]);
+    //  i, ivalues[i][0], ivalues[i][1], ivalues[i][2], ivalues[i][3]);
+  //}
   //error->one(FLERR,"check");
 
+  // initially set inside as cin and outside as cout
   if(aveFlag) {
     int nval;
     double ivalsum;
 	  for(int i = 0; i < Nxyz; i++) {
-      printf("c: %i\n", i);
+      ivalsum = 0.0;
       if(svalues[i] == 0) cvalues[i] = cout;
       else {
-        ivalsum = 0.0;
         nval = 0;
         for(int j = 0; j < ncorner; j++) {
-          //printf("ival: %4.3e\n", ivalues[i][j]);
           if(ivalues[i][j] >= 0) {
-            //printf("in-ival: %4.3e\n", ivalues[i][j]);
             ivalsum += ivalues[i][j];
             nval++;
-            //printf("sum: %4.3e; n: %i\n", ivalsum, nval);
           }
-          //printf("sum: %4.3e; n: %i\n", ivalsum, nval);
         }
-        //printf("sum: %4.3e; n: %i\n", ivalsum, nval);
+
         // no intersections
         if(nval == 0) cvalues[i] = cin;
+        // need to set these points as outside to avoid very small volume error
+        else if(ivalsum == 0) cvalues[i] = MAX(thresh-1,cout);
         else {
-          ivalsum /= nval;
-          cvalues[i] = param2in(ivalsum,0.0);
+          cvalues[i] = param2in(ivalsum/nval,0.0);
         }
       }
-      //printf("ic: %i; p: %4.3e; i: %i; c: %4.3e\n", i, pvalues[i], ivalues[i], cvalues[i]);
+      //printf("ic: %i; s: %i; i: %4.3e; c: %4.3e\n", i, svalues[i], ivalsum, cvalues[i]);
 	  }// end "for" for grid cells
+
+  // find cvalues by solving linear systems
+  } else if(linearFlag) {
+    memory->create(cends,Nxyz,"surf:cends");
+    nends = 0;
+    for(int i = 0; i < Nxyz; i++) {
+      int nnode = 0;
+      for(int j = 0; j < ncorner; j++)
+        if(ivalues[i][j] >= 0) nnode++;
+
+      if(nnode == 0) {
+        if(svalues[i] == 0) cvalues[i] = cout;
+        else if(svalues[i] == 1) cvalues[i] = cin;
+      } else if(nnode == 1) cends[nends++] = i;
+    }
+
+    memory->create(p1p2,ncorner*Nxyz,"surf:p1p2");
+    memory->create(ivalpairs,ncorner*Nxyz,"surf:ivalpairs");
+    memory->create(vends,nends,"surf:vends");
+
+    while(nends>0) {
+      npairs = 0;
+      subLinear2D(cends[0],-1);
+      linearCorners();
+
+      // need to scale data so that it lies between 0 and 255
+
+    }
+
+
+    error->one(FLERR,"testing");
   } else {
-    // can use later when creating surfs
-	  for(int i = 0; i < Nxyz; i++) {
+    for(int i = 0; i < Nxyz; i++) {
       if(svalues[i] == 0) cvalues[i] = cout;
       else if(svalues[i] == 1) cvalues[i] = cin;
-	  }// end "for" for grid cells
+    }// end "for" for grid cells
   }
 
-  //for(int i = 0; i < Nxyz; i++)
-  //  printf("c: %i; cvalue: %4.3e\n", i, cvalues[i]);
+  for(int i = 0; i < Nxyz; i++)
+    printf("c: %i; cvalue: %4.3e\n", i, cvalues[i]);
 
   // free up memory
-  //memory->destroy(ivalues); // use ivalues to find intersections
+  memory->destroy(ivalues);
   memory->destroy(mvalues);
   memory->destroy(svalues);
 
   //error->one(FLERR,"check");
 	return;
+}
+
+/* ----------------------------------------------------------------------
+	 Determines if surface is inline with cell edge. Onsurf input should be 
+   false. Onsurf can only be set to true or unchanged
+
+   Side = 0,1,2 -> [out,in,onsurf]
+------------------------------------------------------------------------- */
+
+int Surf::corner_hit2d(double *p1, double *p2,
+    Line *line, double &param, int &side, int& onsurf)
+{
+  onsurf = 0;
+
+  // try intersect first
+  int h, tside;
+  double tparam;
+  double d3dum[3];
+  h = Geometry::
+    line_line_intersect(p1,p2,line->p1,line->p2,line->norm,d3dum,tparam,tside);
+  if(h) {
+    if(tparam < EPSSURF || (1.0-tparam) < EPSSURF) onsurf = 1;
+    if(tside == 1 || tside == 2 || tside == 5) {
+      side = 1;
+      param = tparam;
+      return true;
+    } else {
+      side = 0;
+      param = tparam;
+      return true;
+    }
+  }
+
+  onsurf = 1;
+  // perturbed points
+  double p1p[3];
+  double p2p[3];
+
+  double dp = mind/1000.0;
+
+  for(int i = 0; i < 8; i++) {
+    p1p[2] = p1[2];
+    p2p[2] = p2[2];
+
+    if(i==0) {
+      p1p[0] = p1[0] + dp;
+      p1p[1] = p1[1] + dp;
+
+      p2p[0] = p2[0] + dp;
+      p2p[1] = p2[1] + dp;
+    } else if(i==1) {
+      p1p[0] = p1[0] - dp;
+      p1p[1] = p1[1] + dp;
+
+      p2p[0] = p2[0] - dp;
+      p2p[1] = p2[1] + dp;
+    } else if(i==2) {
+      p1p[0] = p1[0] + dp;
+      p1p[1] = p1[1] - dp;
+
+      p2p[0] = p2[0] + dp;
+      p2p[1] = p2[1] - dp;
+    } else if(i==3) {
+      p1p[0] = p1[0] - dp;
+      p1p[1] = p1[1] - dp;
+
+      p2p[0] = p2[0] - dp;
+      p2p[1] = p2[1] - dp;
+    } else if(i==4){
+      p1p[0] = p1[0] + dp;
+      p1p[1] = p1[1];
+
+      p2p[0] = p2[0] + dp;
+      p2p[1] = p2[1];
+    } else if(i==5){
+      p1p[0] = p1[0] - dp;
+      p1p[1] = p1[1];
+
+      p2p[0] = p2[0] - dp;
+      p2p[1] = p2[1];
+    } else if(i==6){
+      p1p[0] = p1[0];
+      p1p[1] = p1[1] + dp;
+
+      p2p[0] = p2[0];
+      p2p[1] = p2[1] + dp;
+    } else{
+      p1p[0] = p1[0];
+      p1p[1] = p1[1] - dp;
+
+      p2p[0] = p2[0];
+      p2p[1] = p2[1] - dp;
+    }
+
+    h = Geometry::
+      line_line_intersect(p1p,p2p,line->p1,line->p2,line->norm,d3dum,tparam,tside);
+    if(h) {
+      if(tside == 1 || tside == 2 || tside == 5) {
+        //side = 2;
+        side = 1;
+        if(tparam<0.5) param = 0.0;
+        else param = 1.0;
+        return true;
+      } else {
+        //side = 2;
+        side = 0;
+        if(tparam<0.5) param = 0.0;
+        else param = 1.0;
+        return true;
+      }
+    }
+  }
+
+  // try displacing with line normal
+  // consistent for two surfaces hitting corner
+  /*for(int i = 0; i < 3; i++) {
+    p1p[2] = p1[2];
+    p2p[2] = p2[2];
+
+    if(i==0) {
+      p1p[0] = p1[0] + dp*line->norm[0];
+      p1p[1] = p1[1] + dp*line->norm[1];
+
+      p2p[0] = p2[0] + dp*line->norm[0];
+      p2p[1] = p2[1] + dp*line->norm[1];
+    } else if(i==1) {
+      p1p[0] = p1[0];
+      p1p[1] = p1[1] + dp*line->norm[1];
+
+      p2p[0] = p2[0];
+      p2p[1] = p2[1] + dp*line->norm[1];
+    } else {
+      p1p[0] = p1[0] + dp*line->norm[0];
+      p1p[1] = p1[1];
+
+      p2p[0] = p2[0] + dp*line->norm[0];
+      p2p[1] = p2[1];
+    }
+
+    h = Geometry::
+      line_line_intersect(p1p,p2p,line->p1,line->p2,line->norm,d3dum,tparam,tside);
+    if(h) {
+      if(tside == 1 || tside == 2 || tside == 5) {
+        //side = 2;
+        side = 1;
+        if(tparam<0.5) param = 0.0;
+        else param = 1.0;
+        return true;
+      } else {
+        //side = 2;
+        side = 0;
+        if(tparam<0.5) param = 0.0;
+        else param = 1.0;
+        return true;
+      }
+    }
+  }*/
+
+  // true miss
+  return false;
+}
+
+/* ----------------------------------------------------------------------
+	 Find inside corner value from corner value
+------------------------------------------------------------------------- */
+double Surf::param2in(double param, double v1)
+{
+  double v0;
+  // param is proportional to cell length so 
+  // ... lo = 0; hi = 1
+  // trying to find v0
+  // param = (thresh  - v0) / (v1 - v0)
+  if(param == 1.0) return 255.0;
+  v0 = (thresh - v1*param) / (1.0 - param);
+
+  // bound by limits
+  //v0 = MAX(v0,thresh);
+  v0 = MIN(v0,255.0);
+  return v0;
+}
+
+/* ----------------------------------------------------------------------
+	 Find outside corner value from corner value
+------------------------------------------------------------------------- */
+double Surf::param2out(double param, double v0)
+{
+  double v1;
+  // param is proportional to cell length so 
+  // ... lo = 0; hi = 1
+  // trying to find v0
+  // param = (thresh  - v0) / (v1 - v0)
+  if(param == 0.0) return 255.0;
+  v1 = ((thresh - v0) / param) + v0;
+
+  // bound by limits
+  //v1 = MAX(v1,thresh);
+  v1 = MIN(v1,255.0);
+  return v1;
 }
 
 /* ----------------------------------------------------------------------
@@ -4899,44 +5154,27 @@ void Surf::subLinear2D(int i, int prev)
 ------------------------------------------------------------------------- */
 void Surf::linearCorners()
 {
-  /*int p1, p2;
+  int p1, p2;
   double param;
   double vin, vout;
+
+  double cmax = thresh;
+  double cmin = thresh;
   for(int i = 0; i < npairs; i++) {
     p1 = p1p2[i].first;
     p2 = p1p2[i].second;
 
     // param is distance of surface from p1
     param = ivalpairs[i];
-    //printf("p1: %i; p2: %i; param: %4.3e\n", p1, p2, param);
-    //printf("sval: %i / %i\n", svalues[p1], svalues[p2]);
 
     // if i = 0, p1 is an endpoint and its value needs to be guessed
     // since values will be scaled later, can be any value
-    if(i==0) {
-      if(svalues[p1]==0) {
-        cvalues[p1] = thresh*(1.0-param);
-        cvalues[p2] = thresh + (1.0-param)*cvalues[p1];
-      } else {
-        cvalues[p2] = thresh*(1.0-param);
-        cvalues[p1] = thresh + (1.0-param)*cvalues[p2];
-      }
-    } else {
-      if(svalues[p2]==0) {
-        cvalues[p2] = thresh-;
-      } else {
-        cvalues[p2] = thresh + (1.0-param)*cvalues[p2];
-      }
-    }
-
-
-
     if(svalues[p1]==0) {
+      if(i==0) cvalues[p1] = thresh - 1;
       cvalues[p2] = param2in(param, cvalues[p1]);
-      cthmax = MAX(thresh,cvalues[p1]);
     } else {
+      if(i==0) cvalues[p1] = thresh + 1;
       cvalues[p2] = param2out(param, cvalues[p1]);
-      cthmax = MAX(thresh,cvalues[p2]);
     }
 
     cmax = MAX(cvalues[p1],cmax);
@@ -4944,16 +5182,24 @@ void Surf::linearCorners()
 
     cmin = MIN(cvalues[p1],cmin);
     cmin = MIN(cvalues[p2],cmin);
-
-    //printf("cval: %4.3e / %4.3e\n", cvalues[p1], cvalues[p2]);
-    //double lo = MIN(cvalues[p1],cvalues[p2]);
-    //double hi = MAX(cvalues[p1],cvalues[p2]);
-    //double nparam = (thresh-lo)/(hi-lo);
-    //printf("param-out: %4.3e\n", nparam);
   }
 
-  double dcmin = thresh-cmin;
-  double dcmax = cmax-thresh;
+  if(cmax <= cin && cmin >= 0.0) return;
+  printf("cmin: %3.1e; cmax: %3.1e\n" ,cmin, cmax);
+  error->one(FLERR,"needs to be scaled");
+
+  double dcmax = cout/cmax;
+  double dcmin = (thresh-cmin)/(thresh-cout);
+
+  double cscale;
+  if(dcmax > dcmin) {
+    cscale = cout/cmax;
+  } else {
+
+  }
+
+  //double dcmin = thresh-cmin;
+  //double dcmax = cmax-thresh;
 
   // TODO: Need to find center s.t. largeset value smaller than thresh is 
   // .. still below thresh. Shrink range such that biggest value is below
@@ -4962,46 +5208,10 @@ void Surf::linearCorners()
   // scale values such that min = cout and max = cin
   //double tempc[Nxyz];
 
-  printf("cmin: %4.3e; cmax: %4.3e; cth: %4.3e\n", cmin, cmax, cthmax);
-  printf("dcmin: %4.3e; dcmax: %4.3e\n", dcmin, dcmax);
+  //printf("cmin: %4.3e; cmax: %4.3e; cth: %4.3e\n", cmin, cmax, cthmax);
+  //printf("dcmin: %4.3e; dcmax: %4.3e\n", dcmin, dcmax);
 
-  return;*/
-}
-
-/* ----------------------------------------------------------------------
-	 Find inside corner value from corner value
-------------------------------------------------------------------------- */
-double Surf::param2in(double param, double v1)
-{
-  double v0;
-  // param is proportional to cell length so 
-  // ... lo = 0; hi = 1
-  // trying to find v0
-  // param = (thresh  - v0) / (v1 - v0)
-  v0 = (thresh - v1*param) / (1.0 - param);
-
-  // bound by limits
-  //v0 = MAX(v0,thresh);
-  //v0 = MIN(v0,255.0);
-  return v0;
-}
-
-/* ----------------------------------------------------------------------
-	 Find outside corner value from corner value
-------------------------------------------------------------------------- */
-double Surf::param2out(double param, double v0)
-{
-  double v1;
-  // param is proportional to cell length so 
-  // ... lo = 0; hi = 1
-  // trying to find v0
-  // param = (thresh  - v0) / (v1 - v0)
-  v1 = ((thresh - v0) / param) + v0;
-
-  // bound by limits
-  //v1 = MAX(v1,thresh);
-  //v1 = MIN(v1,255.0);
-  return v1;
+  return;
 }
 
 /* ----------------------------------------------------------------------
@@ -5463,120 +5673,6 @@ void Surf::set_surfcell3d()
   //error->one(FLERR,"check");
   */
 	return;
-}
-
-/* ----------------------------------------------------------------------
-	 Determines if surface is inline with cell edge. Onsurf input should be 
-   false. Onsurf can only be set to true or unchanged
-
-   Side = 0,1,2 -> [out,in,onsurf]
-------------------------------------------------------------------------- */
-
-int Surf::corner_hit2d(double *p1, double *p2,
-    Line *line, double &param, int &side, int& onsurf)
-{
-  onsurf = 0;
-
-  // try intersect first
-  int h, tside;
-  double tparam;
-  double d3dum[3];
-  h = Geometry::
-    line_line_intersect(p1,p2,line->p1,line->p2,line->norm,d3dum,tparam,tside);
-  if(h) {
-    if(tparam < EPSSURF || (1.0-tparam) < EPSSURF) onsurf = 1;
-    if(tside == 1 || tside == 2 || tside == 5) {
-      side = 1;
-      param = tparam;
-      return true;
-    } else {
-      side = 0;
-      param = tparam;
-      return true;
-    }
-  }
-
-
-  onsurf = 1;
-  // perturbed points
-  double p1p[3];
-  double p2p[3];
-
-  double dp = mind/1000.0;
-
-  for(int i = 0; i < 8; i++) {
-    p1p[2] = p1[2];
-    p2p[2] = p2[2];
-
-    if(i==0) {
-      p1p[0] = p1[0] + dp;
-      p1p[1] = p1[1] + dp;
-
-      p2p[0] = p2[0] + dp;
-      p2p[1] = p2[1] + dp;
-    } else if(i==1) {
-      p1p[0] = p1[0] - dp;
-      p1p[1] = p1[1] + dp;
-
-      p2p[0] = p2[0] - dp;
-      p2p[1] = p2[1] + dp;
-    } else if(i==2) {
-      p1p[0] = p1[0] + dp;
-      p1p[1] = p1[1] - dp;
-
-      p2p[0] = p2[0] + dp;
-      p2p[1] = p2[1] - dp;
-    } else if(i==3) {
-      p1p[0] = p1[0] - dp;
-      p1p[1] = p1[1] - dp;
-
-      p2p[0] = p2[0] - dp;
-      p2p[1] = p2[1] - dp;
-    } else if(i==4){
-      p1p[0] = p1[0] + dp;
-      p1p[1] = p1[1];
-
-      p2p[0] = p2[0] + dp;
-      p2p[1] = p2[1];
-    } else if(i==5){
-      p1p[0] = p1[0] - dp;
-      p1p[1] = p1[1];
-
-      p2p[0] = p2[0] - dp;
-      p2p[1] = p2[1];
-    } else if(i==6){
-      p1p[0] = p1[0];
-      p1p[1] = p1[1] + dp;
-
-      p2p[0] = p2[0];
-      p2p[1] = p2[1] + dp;
-    } else{
-      p1p[0] = p1[0];
-      p1p[1] = p1[1] - dp;
-
-      p2p[0] = p2[0];
-      p2p[1] = p2[1] - dp;
-    }
-
-    h = Geometry::
-      line_line_intersect(p1p,p2p,line->p1,line->p2,line->norm,d3dum,tparam,tside);
-    if(h) {
-      if(tside == 1 || tside == 2 || tside == 5) {
-        side = 2;
-        if(tparam<0.5) param = 0.0;
-        else param = 1.0;
-        return true;
-      } else {
-        side = 2;
-        if(tparam<0.5) param = 0.0;
-        else param = 1.0;
-        return true;
-      }
-    }
-  }
-
-  // true miss
-  return false;
 }
 
 /* ----------------------------------------------------------------------

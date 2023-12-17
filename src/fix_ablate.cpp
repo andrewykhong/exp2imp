@@ -437,9 +437,8 @@ void FixAblate::store_corners(int nx_caller, int ny_caller, int nz_caller,
   else mc = new MarchingCubes(sparta,igroup,thresh);
 
   // create implicit surfaces
-
-  create_surfs(1,1);
-  error->one(FLERR,"check");
+  // don't use intersections - still needs more thoughts
+  create_surfs(1,0);
 }
 
 /* ---------------------------------------------------------------------- */
