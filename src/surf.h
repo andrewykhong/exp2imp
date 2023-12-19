@@ -327,26 +327,14 @@ class Surf : protected Pointers {
   double xyzsize[3];       // size of lowest level cell (must be uniform grid)
   int nxyz[3], Nxyz;       // dimensions of grid
   double *cvalues;         // array of corner point values
-  //double *pvalues;         // param values for points (where on edge surface hits)
   double *mvalues;         
   int *svalues;         
   double **ivalues;            // array of flag for intersections
-  //int **intersect;
-  //int *Nintersect;
+
   double **icvalues;       // reshaped cvalues for implicit surface generation
-  double **iivalues;
   int *tvalues;            // vector of per grid cell surf types
 
-  int npairs;
-  std::pair<int,int> *p1p2;
-  double *ivalpairs;
-  int nends;
-  int *cends;
-  int *vends;
-
-
   int aveFlag;             // flag for how corners in unknown cells are set
-  int linearFlag;
   double mind;
   double cin, cout;        // in and out corner values
   double cthresh;          // threshold corner value
